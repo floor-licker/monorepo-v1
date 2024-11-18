@@ -117,6 +117,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
         // Decode event selector
         bytes32 selector = abi.decode(_data[:32], (bytes32));
+
+        //deposit dispatch
         if (selector == DepositInitiated.selector) {
             if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
                 (address asset, uint256 amount) = abi.decode(_data[128:190], (address, uint256));
@@ -126,6 +128,25 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
                 deposit(_data[96:]);
             }
         }
+
+        // withdraw dispatch
+        if (selector == updateWithdrawCrossChain.selector) {
+            if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
+                (address asset, uint256 amount) = abi.decode(_data[96:128], (address, uint256));
+                DataTypes.ReserveData storage reserve = _reserves[asset];
+                _updateStates(reserve, asset, 0, amount, bytes2(3));
+            }
+        }
+        if (selector == CrossChainWithdraw.selector) {
+            emit CrossChainWithdraw(block.chainid, chainIds[i], block.timestamp, msg.sender, asset, to, amounts[i]);
+            (uint256 fromChainId, uint256 toChainId) = abi.decode(_data[32:96], (uint256, uint256));
+            if (toChainId == block.chainid) {
+                (address sender, address asset, uint256 amount, address to) =
+                    abi.decode(_data[128:190], (address, address, uint256, address));
+                _withdraw(sender, asset, amount, to, fromChainId);
+            }
+        }
+
         if (selector == BorrowInitiated.selector) {
             if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
                 (address asset, uint256 amount) = abi.decode(_data[128:190], (address, uint256));
@@ -221,27 +242,52 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (mask >> 2) reserve.updateInterestRates(asset, reserve.aTokenAddress, depositAmount, withdrawAmount);
     }
 
+    event CrossChainWithdraw(
+        uint256 fromChainId,
+        uint256 toChainId,
+        uint256 timestamp,
+        address sender,
+        address asset,
+        uint256 amount,
+        address to
+    );
+
     /**
      * @dev Withdraws an `amount` of underlying asset from the reserve, burning the equivalent aTokens owned
      * E.g. User has 100 aUSDC, calls withdraw() and receives 100 USDC, burning the 100 aUSDC
      * @param asset The address of the underlying asset to withdraw
-     * @param amount The underlying amount to be withdrawn
+     * @param amounts The underlying amount to be withdrawn
      *   - Send the value type(uint256).max in order to withdraw the whole aToken balance
      * @param to Address that will receive the underlying, same as msg.sender if the user
      *   wants to receive it on his own wallet, or a different address if the beneficiary is a
      *   different wallet
-     * @return The final amount withdrawn
-     *
+     * @param chainIds if the withdraw requires multiple chains, the chain ids to withdraw from
      */
-    function withdraw(address asset, uint256 amount, address to) external override whenNotPaused returns (uint256) {
+    // TODO increase the usuability of function more
+
+    function withdraw(address asset, uint256[] calldata amounts, address to, uint256[] calldata chainIds)
+        external
+        override
+        whenNotPaused
+    {
+        // TODO add required checks
+        _withdraw(msg.sender, asset, amounts[0], to, block.chainid);
+        for (uint256 i = 1; i < chainIds.length; i++) {
+            emit CrossChainWithdraw(block.chainid, chainIds[i], block.timestamp, msg.sender, asset, amounts[i], to);
+        }
+    }
+
+    function _withdraw(address sender, address asset, uint256[] calldata amounts, address to, address toChainId)
+        internal
+        returns (uint256)
+    {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
         address aToken = reserve.aTokenAddress;
 
-        // TODO here we need aggregated balances
-        uint256 userBalance = IAToken(aToken).balanceOf(msg.sender);
+        uint256 userBalance = IAToken(aToken).balanceOf(sender);
 
-        uint256 amountToWithdraw = amount;
+        uint256 amountToWithdraw = amounts[0];
 
         if (amount == type(uint256).max) {
             amountToWithdraw = userBalance;
@@ -252,7 +298,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             amountToWithdraw,
             userBalance,
             _reserves,
-            _usersConfig[msg.sender],
+            _usersConfig[sender],
             _reservesList,
             _reservesCount,
             _addressesProvider.getPriceOracle()
@@ -261,16 +307,16 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         _updateStates(reserve, asset, 0, amountToWithdraw, bytes2(3));
 
         if (amountToWithdraw == userBalance) {
-            _usersConfig[msg.sender].setUsingAsCollateral(reserve.id, false);
-            emit ReserveUsedAsCollateralDisabled(asset, msg.sender);
+            _usersConfig[sender].setUsingAsCollateral(reserve.id, false);
+            emit ReserveUsedAsCollateralDisabled(asset, sender);
         }
 
         // TODO do a cross chain burn here
-        IAToken(aToken).burn(msg.sender, to, amountToWithdraw, reserve.liquidityIndex);
+        // so that the aTokens are burned and the underlying is released on toChainId
+        IAToken(aToken).burn(sender, to, amountToWithdraw, reserve.liquidityIndex, toChainId);
 
-        emit Withdraw(asset, msg.sender, to, amountToWithdraw);
-
-        return amountToWithdraw;
+        emit Withdraw(asset, sender, to, amountToWithdraw);
+        emit updateWithdrawCrossChain(block.chainid, sender, asset, amountToWithdraw, to);
     }
 
     function initiateBorrow(
