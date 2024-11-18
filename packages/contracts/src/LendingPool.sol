@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.
 import {Address} from "@openzeppelin/contracts-v5/utils/Address.sol";
 
 import {ILendingPoolAddressesProvider} from "./interfaces/ILendingPoolAddressesProvider.sol";
+// TODO: make AToken, StableDebtToken, VariableDebtToken as SuperchainERC20's
 import {IAToken} from "./interfaces/IAToken.sol";
 import {IVariableDebtToken} from "./interfaces/IVariableDebtToken.sol";
 import {IFlashLoanReceiver} from "./interfaces/IFlashLoanReceiver.sol";
@@ -150,7 +151,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
         /*                    BORROW DISPATCH                       */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
-
+        // TODO think of a better borrow ux
         if (selector == BorrowInitiated.selector) {
             if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
                 (address asset, uint256 amount) = abi.decode(_data[128:190], (address, uint256));
@@ -181,6 +182,34 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == FlashLoanInitiated.selector) flashLoan(_data[96:]);
+
+        /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
+        /*                    REBALANCE DISPATCH                       */
+        /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
+
+        if (selector == RebalanceStableBorrowRate.selector && _identifier.chainId != block.chainid) {
+            (address asset, address user) = abi.decode(_data[32:], (address, address));
+            _rebalanceStableBorrowRate(asset, user);
+        }
+        if (
+            selector == CrossChainRebalanceStableBorrowRate.selector
+                && abi.decode(_data[32:64], (uint256)) == block.chainid
+        ) {
+            (address asset, address user) = abi.decode(_data[64:], (address, address));
+            _rebalanceStableBorrowRate(asset, user);
+        }
+
+        /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
+        /*               UseReserveAsCollateral DISPATCH              */
+        /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
+
+        if (
+            selector == CrossChainSetUserUseReserveAsCollateral.selector
+                && abi.decode(_data[32:64], (uint256)) == block.chainid
+        ) {
+            (address sender, address asset, bool useAsCollateral) = abi.decode(_data[64:], (address, address, bool));
+            _setUserUseReserveAsCollateral(asset, useAsCollateral);
+        }
 
         revert InvalidSelector(selector);
     }
@@ -388,7 +417,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         uint16 referralCode,
         address onBehalfOf
     ) {
-        // TODO TO-THINK actually we dont prevalidation for borrow, if we dont prevalidate the then we can batch all call in one transaction
+        // TODO TO-THINK actually we dont need prevalidation for borrow, if we dont prevalidate the then we can't batch all call in one transaction
         // but maybe that's better
 
         // DataTypes.ReserveData storage reserve = _reserves[vars.asset];
@@ -456,7 +485,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     ) external override whenNotPaused {
         _repay(asset, amounts[0], rateMode[0], onBehalfOf);
 
-        // Emit events for cross-chain repayments
         for (uint256 i = 1; i < chainIds.length; i++) {
             // TODO wrap the assets here and send to the lending pool on the chain
 
@@ -560,7 +588,28 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      * @param user The address of the user to be rebalanced
      *
      */
-    function rebalanceStableBorrowRate(address asset, address user) external override whenNotPaused {
+    function rebalanceStableBorrowRate(address asset, address user, uint256[] calldata chainIds)
+        external
+        override
+        whenNotPaused
+    {
+        _rebalanceStableBorrowRate(asset, user);
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            emit RebalanceStableBorrowRateCrossChain(chainIds[i], asset, user);
+        }
+    }
+
+    /**
+     * @dev Rebalances the stable interest rate of a user to the current stable rate defined on the reserve.
+     * - Users can be rebalanced if the following conditions are satisfied:
+     *     1. Usage ratio is above 95%
+     *     2. the current deposit APY is below REBALANCE_UP_THRESHOLD * maxVariableBorrowRate, which means that too much has been
+     *        borrowed at a stable rate and depositors are not earning enough
+     * @param asset The address of the underlying asset borrowed
+     * @param user The address of the user to be rebalanced
+     *
+     */
+    function _rebalanceStableBorrowRate(address asset, address user) internal {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
         IERC20 stableDebtToken = IERC20(reserve.stableDebtTokenAddress);
@@ -573,23 +622,37 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             reserve, asset, stableDebtToken, variableDebtToken, aTokenAddress
         );
 
-        reserve.updateState();
+        _updateStates(reserve, asset, 0, 0, bytes2(1));
 
         IStableDebtToken(address(stableDebtToken)).burn(user, stableDebt);
         IStableDebtToken(address(stableDebtToken)).mint(user, user, stableDebt, reserve.currentStableBorrowRate);
 
-        reserve.updateInterestRates(asset, aTokenAddress, 0, 0);
+        _updateStates(reserve, asset, 0, 0, bytes2(2));
 
         emit RebalanceStableBorrowRate(asset, user);
     }
 
     /**
-     * @dev Allows depositors to enable/disable a specific deposited asset as collateral
+     * @dev Allows depositors to enable/disable a specific deposited asset as collateral across multiple chains
      * @param asset The address of the underlying asset deposited
      * @param useAsCollateral `true` if the user wants to use the deposit as collateral, `false` otherwise
-     *
+     * @param chainIds Array of chain IDs where the collateral setting should be updated
      */
-    function setUserUseReserveAsCollateral(address asset, bool useAsCollateral) external override whenNotPaused {
+    function setUserUseReserveAsCollateral(address asset, bool[] calldata useAsCollateral, uint256[] calldata chainIds)
+        external
+        override
+        whenNotPaused
+    {
+        _setUserUseReserveAsCollateral(msg.sender, asset, useAsCollateral[0]);
+
+        for (uint256 i = 1; i < chainIds.length; i++) {
+            emit SetUserUseReserveAsCollateralCrossChain(chainIds[i], msg.sender, asset, useAsCollateral[i]);
+        }
+    }
+
+    function _setUserUseReserveAsCollateral(address sender, address user, address asset, bool useAsCollateral)
+        internal
+    {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
         ValidationLogic.validateSetUseReserveAsCollateral(
@@ -597,20 +660,20 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             asset,
             useAsCollateral,
             _reserves,
-            _usersConfig[msg.sender],
+            _usersConfig[sender],
             _reservesList,
             _reservesCount,
             _addressesProvider.getPriceOracle()
         );
 
-        _usersConfig[msg.sender].setUsingAsCollateral(reserve.id, useAsCollateral);
+        _usersConfig[sender].setUsingAsCollateral(reserve.id, useAsCollateral);
 
-        if (useAsCollateral) {
-            emit ReserveUsedAsCollateralEnabled(asset, msg.sender);
-        } else {
-            emit ReserveUsedAsCollateralDisabled(asset, msg.sender);
-        }
+        emit ReserveUsedAsCollateral(sender, asset, useAsCollateral);
     }
+
+    event ReserveUsedAsCollateral(address user, address asset, bool useAsCollateral);
+    // Add new event for cross-chain collateral settings
+    event SetUserUseReserveAsCollateralCrossChain(uint256 chainId, address user, address asset, bool useAsCollateral);
 
     /**
      * @dev Function to liquidate a non-healthy position collateral-wise, with Health Factor below 1
@@ -962,21 +1025,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     }
 
     /**
-     * @dev Updates the address of the interest rate strategy contract
-     * - Only callable by the LendingPoolConfigurator contract
-     * @param asset The address of the underlying asset of the reserve
-     * @param rateStrategyAddress The address of the interest rate strategy contract
-     *
-     */
-    function setReserveInterestRateStrategyAddress(address asset, address rateStrategyAddress)
-        external
-        override
-        onlyLendingPoolConfigurator
-    {
-        _reserves[asset].interestRateStrategyAddress = rateStrategyAddress;
-    }
-
-    /**
      * @dev Sets the configuration bitmap of the reserve as a whole
      * - Only callable by the LendingPoolConfigurator contract
      * @param asset The address of the underlying asset of the reserve
@@ -987,7 +1035,36 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         _reserves[asset].configuration.data = configuration;
     }
 
-    // TODO think about crosschain here
+    /**
+     * @dev Sets the configuration bitmap of the reserve via cross-chain message
+     * - Only callable by the LendingPoolConfigurator contract
+     * @param _identifier Cross-chain message identifier containing origin and chain details
+     * @param _data Encoded message data containing:
+     *        - selector: Function selector to verify the cross-chain call
+     *        - chainId: Target chain ID for the update
+     *        - asset: The address of the underlying asset of the reserve
+     *        - configuration: The new configuration bitmap
+     * @notice Validates the cross-chain message origin and updates the reserve configuration
+     * @notice Will revert if:
+     *         - Message origin is not the LendingPoolConfigurator
+     *         - Chain ID in message doesn't match current chain
+     *         - Selector doesn't match ReserveConfigurationChanged
+     */
+    function setConfiguration(ICrossL2Inbox.Identifier calldata _identifier, bytes calldata _data) external {
+        if (_identifier.origin != _addressesProvider.getLendingPoolConfigurator()) {
+            revert OriginNotLendingPoolConfigurator();
+        }
+        ICrossL2Inbox(Predeploys.CROSS_L2_INBOX).validateMessage(_identifier, keccak256(_data));
+
+        (bytes32 selector, uint256 chainId, address asset, uint256 configuration) =
+            abi.decode(_data, (bytes32, uint256, address, uint256));
+        if (chainId != block.chainid) revert InvalidChainId(chainId);
+        if (selector != ReserveConfigurationChanged.selector) revert InvalidSelector(selector);
+
+        _reserves[asset].configuration.data = configuration;
+    }
+
+    // TODO make crosschain here
     /**
      * @dev Set the _pause state of a reserve
      * - Only callable by the LendingPoolConfigurator contract
@@ -1058,9 +1135,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             userConfig.setBorrowing(reserve.id, true);
         }
 
-        _updateStates(vars.asset, vars.aTokenAddress, 0, 0, bytes2(1));
-
-        reserve.updateInterestRates(vars.asset, vars.aTokenAddress, 0, vars.releaseUnderlying ? vars.amount : 0);
+        _updateStates(vars.asset, vars.aTokenAddress, 0, vars.releaseUnderlying ? vars.amount : 0, bytes2(2));
 
         // TODO instead of releasing the underlying, thinking of minting ATokens that would automatically create
         // a deposit position and users can from a seperate transaction.
