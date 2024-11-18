@@ -746,6 +746,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      *   0 if the action is executed directly by the user, without any middle-man
      *
      */
+    /*
     function flashLoan(
         address receiverAddress,
         address[] calldata assets,
@@ -820,6 +821,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             );
         }
     }
+    */
 
     /**
      * @dev Returns the state and configuration of the reserve
