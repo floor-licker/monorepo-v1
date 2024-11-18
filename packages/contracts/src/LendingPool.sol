@@ -147,6 +147,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             }
         }
 
+        // borrow dispatch
         if (selector == BorrowInitiated.selector) {
             if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
                 (address asset, uint256 amount) = abi.decode(_data[128:190], (address, uint256));
@@ -156,6 +157,24 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
                 borrow(_data[96:]);
             }
         }
+
+        // repay dispatch
+        if (selector == updateRepayCrossChain.selector) {
+            if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
+                (address asset, uint256 amount) = abi.decode(_data[96:128], (address, uint256));
+                DataTypes.ReserveData storage reserve = _reserves[asset];
+                _updateStates(reserve, asset, amount, 0, bytes2(3));
+            }
+        }
+        if (selector == CrossChainRepay.selector) {
+            (uint256 fromChainId, uint256 toChainId) = abi.decode(_data[32:96], (uint256, uint256));
+            if (toChainId == block.chainid) {
+                (address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf) =
+                    abi.decode(_data[128:256], (address, address, uint256, uint256, address));
+                _repay(asset, amount, rateMode, onBehalfOf);
+            }
+        }
+
         if (selector == FlashLoanInitiated.selector) flashLoan(_data[96:]);
 
         revert InvalidSelector(selector);
@@ -221,6 +240,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         ValidationLogic.validateDeposit(reserve, amount);
 
         _updateStates(reserve, asset, amount, 0, bytes2(3));
+
+        IERC20(asset).safeTransferFrom(msg.sender, aToken, amount);
 
         bool isFirstDeposit = IAToken(aToken).mint(onBehalfOf, amount, reserve.liquidityIndex);
         if (isFirstDeposit) {
@@ -313,12 +334,29 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
         // TODO do a cross chain burn here
         // so that the aTokens are burned and the underlying is released on toChainId
+        // also unwrap the assets here from SuperChain token to the underlying asset
         IAToken(aToken).burn(sender, to, amountToWithdraw, reserve.liquidityIndex, toChainId);
 
         emit Withdraw(asset, sender, to, amountToWithdraw);
         emit updateWithdrawCrossChain(block.chainid, sender, asset, amountToWithdraw, to);
     }
 
+    /**
+     * @dev Allows users to borrow a specific `amount` of the reserve underlying asset, provided that the borrower
+     * already deposited enough collateral, or he was given enough allowance by a credit delegator on the
+     * corresponding debt token (StableDebtToken or VariableDebtToken)
+     * - E.g. User borrows 100 USDC passing as `onBehalfOf` his own address, receiving the 100 USDC in his wallet
+     *   and 100 stable/variable debt tokens, depending on the `interestRateMode`
+     * @param asset The address of the underlying asset to borrow
+     * @param amount The amount to be borrowed
+     * @param interestRateMode The interest rate mode at which the user wants to borrow: 1 for Stable, 2 for Variable
+     * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
+     *   0 if the action is executed directly by the user, without any middle-man
+     * @param onBehalfOf Address of the user who will receive the debt. Should be the address of the borrower itself
+     * calling the function if he wants to borrow against his own collateral, or the address of the credit delegator
+     * if he has been given credit delegation allowance
+     *
+     */
     function initiateBorrow(
         address asset,
         uint256 amount,
@@ -357,22 +395,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         );
     }
 
-    /**
-     * @dev Allows users to borrow a specific `amount` of the reserve underlying asset, provided that the borrower
-     * already deposited enough collateral, or he was given enough allowance by a credit delegator on the
-     * corresponding debt token (StableDebtToken or VariableDebtToken)
-     * - E.g. User borrows 100 USDC passing as `onBehalfOf` his own address, receiving the 100 USDC in his wallet
-     *   and 100 stable/variable debt tokens, depending on the `interestRateMode`
-     * @param asset The address of the underlying asset to borrow
-     * @param amount The amount to be borrowed
-     * @param interestRateMode The interest rate mode at which the user wants to borrow: 1 for Stable, 2 for Variable
-     * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
-     *   0 if the action is executed directly by the user, without any middle-man
-     * @param onBehalfOf Address of the user who will receive the debt. Should be the address of the borrower itself
-     * calling the function if he wants to borrow against his own collateral, or the address of the credit delegator
-     * if he has been given credit delegation allowance
-     *
-     */
     function borrow(bytes _data) internal override {
         (
             address sender,
@@ -391,28 +413,51 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             )
         );
     }
-
+    
     /**
-     * @notice Repays a borrowed `amount` on a specific reserve, burning the equivalent debt tokens owned
-     * - E.g. User repays 100 USDC, burning 100 variable/stable debt tokens of the `onBehalfOf` address
+     * @dev Repays a borrowed `amount` on a specific reserve across multiple chains, burning the equivalent debt tokens owned
      * @param asset The address of the borrowed underlying asset previously borrowed
-     * @param amount The amount to repay
+     * @param amounts Array of amounts to repay per chain
      * - Send the value type(uint256).max in order to repay the whole debt for `asset` on the specific `debtMode`
-     * @param rateMode The interest rate mode at of the debt the user wants to repay: 1 for Stable, 2 for Variable
-     * @param onBehalfOf Address of the user who will get his debt reduced/removed. Should be the address of the
-     * user calling the function if he wants to reduce/remove his own debt, or the address of any other
-     * other borrower whose debt should be removed
-     * @return The final amount repaid
-     *
+     * @param rateMode Array of interest rate modes to repay per chain: 1 for Stable, 2 for Variable
+     * @param onBehalfOf Address of the user who will get their debt reduced/removed
+     * @param chainIds Array of chain IDs where the debt needs to be repaid
      */
-    function repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf)
-        external
-        override
-        whenNotPaused
-        returns (uint256)
-    {
+    function repay(
+        address asset,
+        uint256[] calldata amounts,
+        uint256[] calldata rateMode,
+        address onBehalfOf,
+        uint256[] calldata chainIds
+    ) external override whenNotPaused {
+        _repay(asset, amounts[0], rateMode[0], onBehalfOf);
+
+        // Emit events for cross-chain repayments
+        for (uint256 i = 1; i < chainIds.length; i++) {
+            // TODO wrap the assets here and send to the lending pool on the chain
+
+            emit CrossChainRepay(
+                block.chainid,
+                chainIds[i],
+                block.timestamp,
+                msg.sender,
+                asset,
+                amounts[i],
+                rateMode,
+                onBehalfOf
+            );
+        }
+    }
+
+    function _repay(
+        address asset,
+        uint256 amount,
+        uint256 rateMode,
+        address onBehalfOf
+    ) internal returns (uint256) {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
+        /// @dev this will get the debt of the user on the current chain
         (uint256 stableDebt, uint256 variableDebt) = Helpers.getUserCurrentDebt(onBehalfOf, reserve);
 
         DataTypes.InterestRateMode interestRateMode = DataTypes.InterestRateMode(rateMode);
@@ -425,7 +470,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             paybackAmount = amount;
         }
 
-        reserve.updateState();
+        _updateStates(reserve, asset, paybackAmount, 0, bytes2(3));
 
         if (interestRateMode == DataTypes.InterestRateMode.STABLE) {
             IStableDebtToken(reserve.stableDebtTokenAddress).burn(onBehalfOf, paybackAmount);
@@ -436,20 +481,33 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         }
 
         address aToken = reserve.aTokenAddress;
-        reserve.updateInterestRates(asset, aToken, paybackAmount, 0);
 
         if (stableDebt + variableDebt - paybackAmount == 0) {
             _usersConfig[onBehalfOf].setBorrowing(reserve.id, false);
         }
 
-        IERC20(asset).safeTransferFrom(msg.sender, aToken, paybackAmount);
+        // TODO unwrap the assets here from SuperChain token to the underlying asset
+        IERC20(asset).safeTransfer(aToken, paybackAmount);
 
         IAToken(aToken).handleRepayment(msg.sender, paybackAmount);
 
         emit Repay(asset, onBehalfOf, msg.sender, paybackAmount);
+        emit updateRepayCrossChain(block.chainid, msg.sender, asset, paybackAmount, onBehalfOf);
 
         return paybackAmount;
     }
+
+    // Add new event for cross-chain repayments
+    event CrossChainRepay(
+        uint256 fromChainId,
+        uint256 toChainId,
+        uint256 timestamp,
+        address sender,
+        address asset,
+        uint256 amount,
+        uint256 rateMode,
+        address onBehalfOf
+    );
 
     /**
      * @dev Allows a borrower to swap his debt between stable and variable mode, or viceversa
@@ -487,6 +545,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         reserve.updateInterestRates(asset, reserve.aTokenAddress, 0, 0);
 
         emit Swap(asset, msg.sender, rateMode);
+        emit updateSwapRateModeCrossChain(block.chainid, msg.sender, asset, rateMode);
     }
 
     /**
