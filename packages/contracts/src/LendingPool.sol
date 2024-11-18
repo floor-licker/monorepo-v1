@@ -130,7 +130,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         }
         if (selector == CrossChainDeposit.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
             (address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode) =
-                abi.decode(_data[64:], (address, address, uint256, address, uint16));
+                abi.decode(_data[96:], (address, address, uint256, address, uint16));
             _deposit(sender, asset, amount, onBehalfOf, referralCode);
         }
 
@@ -138,20 +138,17 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*                    WITHDRAW DISPATCH                       */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-        if (selector == updateWithdrawCrossChain.selector) {
-            if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
-                (address asset, uint256 amount) = abi.decode(_data[96:128], (address, uint256));
+        if (selector == Withdraw.selector) {
+            if (_identifier.chainId != block.chainid) {
+                (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
                 DataTypes.ReserveData storage reserve = _reserves[asset];
                 _updateStates(reserve, asset, 0, amount, bytes2(3));
             }
         }
-        if (selector == CrossChainWithdraw.selector) {
-            (uint256 fromChainId, uint256 toChainId) = abi.decode(_data[32:96], (uint256, uint256));
-            if (toChainId == block.chainid) {
-                (address sender, address asset, uint256 amount, address to) =
-                    abi.decode(_data[128:190], (address, address, uint256, address));
-                _withdraw(sender, asset, amount, to, fromChainId);
-            }
+        if (selector == CrossChainWithdraw.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
+            (address sender, address asset, uint256 amount, address to) =
+                abi.decode(_data[96:], (address, address, uint256, address));
+            _withdraw(sender, asset, amount, to, _identifier.chainId);
         }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
@@ -305,9 +302,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     }
 
     event CrossChainWithdraw(
-        uint256 fromChainId,
         uint256 toChainId,
-        uint256 timestamp,
         address sender,
         address asset,
         uint256 amount,
@@ -335,7 +330,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         // TODO add required checks
         _withdraw(msg.sender, asset, amounts[0], to, block.chainid);
         for (uint256 i = 1; i < chainIds.length; i++) {
-            emit CrossChainWithdraw(block.chainid, chainIds[i], block.timestamp, msg.sender, asset, amounts[i], to);
+            emit CrossChainWithdraw(chainIds[i], msg.sender, asset, amounts[i], to);
         }
     }
 
@@ -378,8 +373,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         // also unwrap the assets here from SuperChain token to the underlying asset
         IAToken(aToken).burn(sender, to, amountToWithdraw, reserve.liquidityIndex, toChainId);
 
-        emit Withdraw(asset, sender, to, amountToWithdraw);
-        emit updateWithdrawCrossChain(block.chainid, sender, asset, amountToWithdraw, to);
+        emit Withdraw(sender, asset, to, amountToWithdraw);
     }
 
     /**
