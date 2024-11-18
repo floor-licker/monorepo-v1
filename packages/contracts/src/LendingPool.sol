@@ -121,12 +121,10 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*                     DEPOSIT DISPATCH                       */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-        if (selector == Deposit.selector) {
-            if (_identifier.chainId != block.chainid) {
-                (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
-                DataTypes.ReserveData storage reserve = _reserves[asset];
-                _updateStates(reserve, asset, amount, 0, bytes2(3));
-            }
+        if (selector == Deposit.selector && _identifier.chainId != block.chainid) {
+            (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
+            DataTypes.ReserveData storage reserve = _reserves[asset];
+            _updateStates(reserve, asset, amount, 0, bytes2(3));
         }
         if (selector == CrossChainDeposit.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
             (address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode) =
@@ -138,12 +136,10 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*                    WITHDRAW DISPATCH                       */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-        if (selector == Withdraw.selector) {
-            if (_identifier.chainId != block.chainid) {
-                (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
-                DataTypes.ReserveData storage reserve = _reserves[asset];
-                _updateStates(reserve, asset, 0, amount, bytes2(3));
-            }
+        if (selector == Withdraw.selector && _identifier.chainId != block.chainid) {
+            (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
+            DataTypes.ReserveData storage reserve = _reserves[asset];
+            _updateStates(reserve, asset, 0, amount, bytes2(3));
         }
         if (selector == CrossChainWithdraw.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
             (address sender, address asset, uint256 amount, address to) =
@@ -169,21 +165,20 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*                    REPAY DISPATCH                       */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-        if (selector == updateRepayCrossChain.selector) {
-            if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
-                (address asset, uint256 amount) = abi.decode(_data[96:128], (address, uint256));
-                DataTypes.ReserveData storage reserve = _reserves[asset];
-                _updateStates(reserve, asset, amount, 0, bytes2(3));
-            }
+        if (selector == Repay.selector && _identifier.chainId != block.chainid) {
+            (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
+            DataTypes.ReserveData storage reserve = _reserves[asset];
+            _updateStates(reserve, asset, amount, 0, bytes2(3));
         }
-        if (selector == CrossChainRepay.selector) {
-            (uint256 fromChainId, uint256 toChainId) = abi.decode(_data[32:96], (uint256, uint256));
-            if (toChainId == block.chainid) {
-                (address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf) =
-                    abi.decode(_data[128:256], (address, address, uint256, uint256, address));
-                _repay(asset, amount, rateMode, onBehalfOf);
-            }
+        if (selector == CrossChainRepay.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
+            (address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf) =
+                abi.decode(_data[64:], (address, address, uint256, uint256, address));
+            _repay(asset, amount, rateMode, onBehalfOf);
         }
+
+        /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
+        /*                    FLASHLOAN DISPATCH                       */
+        /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == FlashLoanInitiated.selector) flashLoan(_data[96:]);
 
@@ -301,13 +296,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (mask >> 2) reserve.updateInterestRates(asset, reserve.aTokenAddress, depositAmount, withdrawAmount);
     }
 
-    event CrossChainWithdraw(
-        uint256 toChainId,
-        address sender,
-        address asset,
-        uint256 amount,
-        address to
-    );
+    event CrossChainWithdraw(uint256 toChainId, address sender, address asset, uint256 amount, address to);
 
     /**
      * @dev Withdraws an `amount` of underlying asset from the reserve, burning the equivalent aTokens owned
@@ -477,7 +466,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         }
     }
 
-    function _repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf) internal returns (uint256) {
+    function _repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf) internal {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
         /// @dev this will get the debt of the user on the current chain
@@ -514,22 +503,12 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
         IAToken(aToken).handleRepayment(msg.sender, paybackAmount);
 
-        emit Repay(asset, onBehalfOf, msg.sender, paybackAmount);
-        emit updateRepayCrossChain(block.chainid, msg.sender, asset, paybackAmount, onBehalfOf);
-
-        return paybackAmount;
+        emit Repay(asset, paybackAmount, onBehalfOf);
     }
 
     // Add new event for cross-chain repayments
     event CrossChainRepay(
-        uint256 fromChainId,
-        uint256 toChainId,
-        uint256 timestamp,
-        address sender,
-        address asset,
-        uint256 amount,
-        uint256 rateMode,
-        address onBehalfOf
+        uint256 toChainId, address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf
     );
 
     /**
