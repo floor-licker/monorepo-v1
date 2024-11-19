@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: agpl-3.0
-pragma solidity 0.6.12;
-pragma experimental ABIEncoderV2;
+pragma solidity 0.8.25;
 
-import {SafeMath} from "../../dependencies/openzeppelin/contracts/SafeMath.sol";
-import {VersionedInitializable} from "../libraries/aave-upgradeability/VersionedInitializable.sol";
+import {IERC20} from "@openzeppelin/contracts-v5/token/ERC20/IERC20.sol";
+
+import {ILendingPoolAddressesProvider} from "./interfaces/ILendingPoolAddressesProvider.sol";
+import {ILendingPool} from "./interfaces/ILendingPool.sol";
+import {IInitializableDebtToken} from "./interfaces/IInitializableDebtToken.sol";
+import {IInitializableAToken} from "./interfaces/IInitializableAToken.sol";
+import {IAaveIncentivesController} from "./interfaces/IAaveIncentivesController.sol";
+import {ILendingPoolConfigurator} from "./interfaces/ILendingPoolConfigurator.sol";
+
+import {VersionedInitializable} from "./libraries/aave-upgradeability/VersionedInitializable.sol";
 import {InitializableImmutableAdminUpgradeabilityProxy} from
-    "../libraries/aave-upgradeability/InitializableImmutableAdminUpgradeabilityProxy.sol";
-import {ReserveConfiguration} from "../libraries/configuration/ReserveConfiguration.sol";
-import {ILendingPoolAddressesProvider} from "../../interfaces/ILendingPoolAddressesProvider.sol";
-import {ILendingPool} from "../../interfaces/ILendingPool.sol";
-import {IERC20Detailed} from "../../dependencies/openzeppelin/contracts/IERC20Detailed.sol";
-import {Errors} from "../libraries/helpers/Errors.sol";
-import {PercentageMath} from "../libraries/math/PercentageMath.sol";
-import {DataTypes} from "../libraries/types/DataTypes.sol";
-import {IInitializableDebtToken} from "../../interfaces/IInitializableDebtToken.sol";
-import {IInitializableAToken} from "../../interfaces/IInitializableAToken.sol";
-import {IAaveIncentivesController} from "../../interfaces/IAaveIncentivesController.sol";
-import {ILendingPoolConfigurator} from "../../interfaces/ILendingPoolConfigurator.sol";
+    "./libraries/aave-upgradeability/InitializableImmutableAdminUpgradeabilityProxy.sol";
+import {ReserveConfiguration} from "./libraries/configuration/ReserveConfiguration.sol";
+import {Errors} from "./libraries/helpers/Errors.sol";
+import {PercentageMath} from "./libraries/math/PercentageMath.sol";
+import {DataTypes} from "./libraries/types/DataTypes.sol";
 
 /**
  * @title LendingPoolConfigurator contract
@@ -25,7 +25,6 @@ import {ILendingPoolConfigurator} from "../../interfaces/ILendingPoolConfigurato
  *
  */
 contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigurator {
-    using SafeMath for uint256;
     using PercentageMath for uint256;
     using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
 
@@ -448,7 +447,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
     function _checkNoLiquidity(address asset) internal view {
         DataTypes.ReserveData memory reserveData = pool.getReserveData(asset);
 
-        uint256 availableLiquidity = IERC20Detailed(asset).balanceOf(reserveData.aTokenAddress);
+        uint256 availableLiquidity = IERC20(asset).balanceOf(reserveData.aTokenAddress);
 
         require(availableLiquidity == 0 && reserveData.currentLiquidityRate == 0, Errors.LPC_RESERVE_LIQUIDITY_NOT_0);
     }

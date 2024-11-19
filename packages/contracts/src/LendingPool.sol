@@ -30,6 +30,9 @@ import {DataTypes} from "./libraries/types/DataTypes.sol";
 
 import {LendingPoolStorage} from "./LendingPoolStorage.sol";
 
+import {Predeploys} from "@contracts-bedrock/libraries/Predeploys.sol";
+import {ICrossL2Inbox} from "@contracts-bedrock/L2/interfaces/ICrossL2Inbox.sol";
+
 /**
  * @title LendingPool contract
  * @dev Main point of interaction with an Aave protocol's market
@@ -64,6 +67,13 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     error InvalidSelector(bytes32 selector);
     error OriginNotSuperLend();
 
+    event FlashLoanInitiated(address indexed receiver, address[] assets, uint256[] amounts);
+    event RebalanceStableBorrowRateCrossChain(uint256 chainId, address asset, address user);
+    event updateSwapRateModeCrossChain(uint256 chainId, address user, address asset, uint256 rateMode);
+    event ReserveConfigurationChanged(address indexed asset, uint256 configuration);
+    event CrossChainRebalanceStableBorrowRate(uint256 chainId, address asset, address user);
+    event CrossChainSetUserUseReserveAsCollateral(uint256 chainId, address asset, bool useAsCollateral);
+
     modifier whenNotPaused() {
         _whenNotPaused();
         _;
@@ -71,11 +81,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     modifier onlyLendingPoolConfigurator() {
         _onlyLendingPoolConfigurator();
-        _;
-    }
-
-    modifier onlyRelayer() {
-        _onlyRelayer();
         _;
     }
 
@@ -88,10 +93,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             _addressesProvider.getLendingPoolConfigurator() == msg.sender,
             Errors.LP_CALLER_NOT_LENDING_POOL_CONFIGURATOR
         );
-    }
-
-    function _onlyRelayer() internal view {
-        require(_addressesProvider.getRelayer() == msg.sender, Errors.LP_CALLER_NOT_LENDING_POOL_CONFIGURATOR);
     }
 
     function getRevision() internal pure override returns (uint256) {
@@ -126,7 +127,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (selector == Deposit.selector && _identifier.chainId != block.chainid) {
             (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
-            _updateStates(reserve, asset, amount, 0, bytes2(3));
+            _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
         }
         if (selector == CrossChainDeposit.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
             (address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode) =
@@ -141,7 +142,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (selector == Withdraw.selector && _identifier.chainId != block.chainid) {
             (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
-            _updateStates(reserve, asset, 0, amount, bytes2(3));
+            _updateStates(reserve, asset, 0, amount, bytes2(uint16(3)));
         }
         if (selector == CrossChainWithdraw.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
             (address sender, address asset, uint256 amount, address to) =
@@ -156,7 +157,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (selector == Borrow.selector && _identifier.chainId != block.chainid) {
             (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
-            _updateStates(reserve, asset, 0, amount, bytes2(3));
+            _updateStates(reserve, asset, 0, amount, bytes2(uint16(3)));
         }
         if (selector == CrossChainBorrow.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
             (
@@ -178,19 +179,19 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (selector == Repay.selector && _identifier.chainId != block.chainid) {
             (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
-            _updateStates(reserve, asset, amount, 0, bytes2(3));
+            _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
         }
         if (selector == CrossChainRepay.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
             (address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf) =
                 abi.decode(_data[64:], (address, address, uint256, uint256, address));
-            _repay(asset, amount, rateMode, onBehalfOf);
+            _repay(sender, asset, amount, rateMode, onBehalfOf);
         }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
         /*                    FLASHLOAN DISPATCH                      */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-        if (selector == FlashLoanInitiated.selector) flashLoan(_data[96:]);
+        // if (selector == FlashLoanInitiated.selector) flashLoan(_data[96:]);
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
         /*                    REBALANCE DISPATCH                      */
@@ -217,7 +218,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
                 && abi.decode(_data[32:64], (uint256)) == block.chainid
         ) {
             (address sender, address asset, bool useAsCollateral) = abi.decode(_data[64:], (address, address, bool));
-            _setUserUseReserveAsCollateral(asset, useAsCollateral);
+            _setUserUseReserveAsCollateral(sender, asset, useAsCollateral);
         }
 
         revert InvalidSelector(selector);
@@ -255,7 +256,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
         ValidationLogic.validateDeposit(reserve, amount);
 
-        _updateStates(reserve, asset, amount, 0, bytes2(3));
+        _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
 
         IERC20(asset).safeTransferFrom(sender, aToken, amount);
 
@@ -274,6 +275,9 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         uint256 toChainId, address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode
     );
 
+    bytes2 private constant UPDATE_STATE_MASK = bytes2(uint16(1));
+    bytes2 private constant UPDATE_RATES_MASK = bytes2(uint16(2));
+
     function _updateStates(
         DataTypes.ReserveData storage reserve,
         address asset,
@@ -281,8 +285,10 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         uint256 withdrawAmount,
         bytes2 mask
     ) internal {
-        if (mask >> 1) reserve.updateState();
-        if (mask >> 2) reserve.updateInterestRates(asset, reserve.aTokenAddress, depositAmount, withdrawAmount);
+        if (mask & UPDATE_STATE_MASK != 0) reserve.updateState();
+        if (mask & UPDATE_RATES_MASK != 0) {
+            reserve.updateInterestRates(asset, reserve.aTokenAddress, depositAmount, withdrawAmount);
+        }
     }
 
     event CrossChainWithdraw(
@@ -330,7 +336,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             _addressesProvider.getPriceOracle()
         );
 
-        _updateStates(reserve, asset, 0, amountToWithdraw, bytes2(3));
+        _updateStates(reserve, asset, 0, amountToWithdraw, bytes2(uint16(3)));
 
         if (amountToWithdraw == userBalance) {
             _usersConfig[sender].setUsingAsCollateral(reserve.id, false);
@@ -435,16 +441,14 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         for (uint256 i = 1; i < chainIds.length; i++) {
             // TODO wrap the assets here and send to the lending pool on the chain
             if (chainIds[i] == block.chainid) {
-                _repay(asset, amounts[i], rateMode[i], onBehalfOf);
+                _repay(msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             } else {
-                emit CrossChainRepay(
-                    block.chainid, chainIds[i], block.timestamp, msg.sender, asset, amounts[i], rateMode[i], onBehalfOf
-                );
+                emit CrossChainRepay(chainIds[i], msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             }
         }
     }
 
-    function _repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf) internal {
+    function _repay(address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf) internal {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
         /// @dev this will get the debt of the user on the current chain
@@ -460,7 +464,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             paybackAmount = amount;
         }
 
-        _updateStates(reserve, asset, paybackAmount, 0, bytes2(3));
+        _updateStates(reserve, asset, paybackAmount, 0, bytes2(uint16(3)));
 
         if (interestRateMode == DataTypes.InterestRateMode.STABLE) {
             IStableDebtToken(reserve.stableDebtTokenAddress).burn(onBehalfOf, paybackAmount);
@@ -479,9 +483,9 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         // TODO unwrap the assets here from SuperChain token to the underlying asset
         IERC20(asset).safeTransfer(aToken, paybackAmount);
 
-        IAToken(aToken).handleRepayment(msg.sender, paybackAmount);
+        IAToken(aToken).handleRepayment(sender, paybackAmount);
 
-        emit Repay(asset, paybackAmount, onBehalfOf);
+        emit Repay(asset, paybackAmount, onBehalfOf, sender);
     }
 
     // Add new event for cross-chain repayments
@@ -540,10 +544,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      */
     function rebalanceStableBorrowRate(address asset, address user, uint256[] calldata chainIds)
         external
-        override
         whenNotPaused
     {
-        _rebalanceStableBorrowRate(asset, user);
         for (uint256 i = 0; i < chainIds.length; i++) {
             emit RebalanceStableBorrowRateCrossChain(chainIds[i], asset, user);
         }
@@ -572,12 +574,12 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             reserve, asset, stableDebtToken, variableDebtToken, aTokenAddress
         );
 
-        _updateStates(reserve, asset, 0, 0, bytes2(1));
+        _updateStates(reserve, asset, 0, 0, bytes2(uint16(1)));
 
         IStableDebtToken(address(stableDebtToken)).burn(user, stableDebt);
         IStableDebtToken(address(stableDebtToken)).mint(user, user, stableDebt, reserve.currentStableBorrowRate);
 
-        _updateStates(reserve, asset, 0, 0, bytes2(2));
+        _updateStates(reserve, asset, 0, 0, bytes2(uint16(2)));
 
         emit RebalanceStableBorrowRate(asset, user);
     }
@@ -593,10 +595,12 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         override
         whenNotPaused
     {
-        _setUserUseReserveAsCollateral(msg.sender, asset, useAsCollateral[0]);
-
-        for (uint256 i = 1; i < chainIds.length; i++) {
-            emit SetUserUseReserveAsCollateralCrossChain(chainIds[i], msg.sender, asset, useAsCollateral[i]);
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            if (chainIds[i] == block.chainid) {
+                _setUserUseReserveAsCollateral(msg.sender, asset, useAsCollateral[i]);
+            } else {
+                emit SetUserUseReserveAsCollateralCrossChain(chainIds[i], msg.sender, asset, useAsCollateral[i]);
+            }
         }
     }
 
@@ -694,7 +698,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      *   0 if the action is executed directly by the user, without any middle-man
      *
      */
-    /*
     function flashLoan(
         address receiverAddress,
         address[] calldata assets,
@@ -705,71 +708,70 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         bytes calldata params,
         uint16 referralCode
     ) external override whenNotPaused {
-        FlashLoanLocalVars memory vars;
+        // FlashLoanLocalVars memory vars;
 
-        ValidationLogic.validateFlashloan(assets, amounts);
+        // ValidationLogic.validateFlashloan(assets, amounts);
 
-        address[] memory aTokenAddresses = new address[](assets.length);
-        uint256[] memory premiums = new uint256[](assets.length);
+        // address[] memory aTokenAddresses = new address[](assets.length);
+        // uint256[] memory premiums = new uint256[](assets.length);
 
-        vars.receiver = IFlashLoanReceiver(receiverAddress);
+        // vars.receiver = IFlashLoanReceiver(receiverAddress);
 
-        for (vars.i = 0; vars.i < assets.length; vars.i++) {
-            aTokenAddresses[vars.i] = _reserves[assets[vars.i]].aTokenAddress;
+        // for (vars.i = 0; vars.i < assets.length; vars.i++) {
+        //     aTokenAddresses[vars.i] = _reserves[assets[vars.i]].aTokenAddress;
 
-            premiums[vars.i] = amounts[vars.i] * _flashLoanPremiumTotal / 10000;
+        //     premiums[vars.i] = amounts[vars.i] * _flashLoanPremiumTotal / 10000;
 
-            // TODO transfer assets from all the listed chains
-            // maybe something like the underlying assets are wrapped to SuperChainERC20 tokens
-            IAToken(aTokenAddresses[vars.i]).transferUnderlyingTo(receiverAddress, amounts[vars.i]);
-        }
+        //     // TODO transfer assets from all the listed chains
+        //     // maybe something like the underlying assets are wrapped to SuperChainERC20 tokens
+        //     IAToken(aTokenAddresses[vars.i]).transferUnderlyingTo(receiverAddress, amounts[vars.i]);
+        // }
 
-        require(
-            vars.receiver.executeOperation(assets, amounts, premiums, msg.sender, params),
-            Errors.LP_INVALID_FLASH_LOAN_EXECUTOR_RETURN
-        );
+        // require(
+        //     vars.receiver.executeOperation(assets, amounts, premiums, msg.sender, params),
+        //     Errors.LP_INVALID_FLASH_LOAN_EXECUTOR_RETURN
+        // );
 
-        for (vars.i = 0; vars.i < assets.length; vars.i++) {
-            vars.currentAsset = assets[vars.i];
-            vars.currentAmount = amounts[vars.i];
-            vars.currentPremium = premiums[vars.i];
-            vars.currentATokenAddress = aTokenAddresses[vars.i];
-            vars.currentAmountPlusPremium = vars.currentAmount + vars.currentPremium;
+        // for (vars.i = 0; vars.i < assets.length; vars.i++) {
+        //     vars.currentAsset = assets[vars.i];
+        //     vars.currentAmount = amounts[vars.i];
+        //     vars.currentPremium = premiums[vars.i];
+        //     vars.currentATokenAddress = aTokenAddresses[vars.i];
+        //     vars.currentAmountPlusPremium = vars.currentAmount + vars.currentPremium;
 
-            if (DataTypes.InterestRateMode(modes[vars.i]) == DataTypes.InterestRateMode.NONE) {
-                _reserves[vars.currentAsset].updateState();
-                _reserves[vars.currentAsset].cumulateToLiquidityIndex(
-                    IERC20(vars.currentATokenAddress).totalSupply(), vars.currentPremium
-                );
-                _reserves[vars.currentAsset].updateInterestRates(
-                    vars.currentAsset, vars.currentATokenAddress, vars.currentAmountPlusPremium, 0
-                );
+        //     if (DataTypes.InterestRateMode(modes[vars.i]) == DataTypes.InterestRateMode.NONE) {
+        //         _reserves[vars.currentAsset].updateState();
+        //         _reserves[vars.currentAsset].cumulateToLiquidityIndex(
+        //             IERC20(vars.currentATokenAddress).totalSupply(), vars.currentPremium
+        //         );
+        //         _reserves[vars.currentAsset].updateInterestRates(
+        //             vars.currentAsset, vars.currentATokenAddress, vars.currentAmountPlusPremium, 0
+        //         );
 
-                IERC20(vars.currentAsset).safeTransferFrom(
-                    receiverAddress, vars.currentATokenAddress, vars.currentAmountPlusPremium
-                );
-            } else {
-                // If the user chose to not return the funds, the system checks if there is enough collateral and
-                // eventually opens a debt position
-                _executeBorrow(
-                    ExecuteBorrowParams(
-                        vars.currentAsset,
-                        msg.sender,
-                        onBehalfOf,
-                        vars.currentAmount,
-                        modes[vars.i],
-                        vars.currentATokenAddress,
-                        referralCode,
-                        false
-                    )
-                );
-            }
-            emit FlashLoan(
-                receiverAddress, msg.sender, vars.currentAsset, vars.currentAmount, vars.currentPremium, referralCode
-            );
-        }
+        //         IERC20(vars.currentAsset).safeTransferFrom(
+        //             receiverAddress, vars.currentATokenAddress, vars.currentAmountPlusPremium
+        //         );
+        //     } else {
+        //         // If the user chose to not return the funds, the system checks if there is enough collateral and
+        //         // eventually opens a debt position
+        //         _executeBorrow(
+        //             ExecuteBorrowParams(
+        //                 vars.currentAsset,
+        //                 msg.sender,
+        //                 onBehalfOf,
+        //                 vars.currentAmount,
+        //                 modes[vars.i],
+        //                 vars.currentATokenAddress,
+        //                 referralCode,
+        //                 false
+        //             )
+        //         );
+        //     }
+        //     emit FlashLoan(
+        //         receiverAddress, msg.sender, vars.currentAsset, vars.currentAmount, vars.currentPremium, referralCode
+        //     );
+        // }
     }
-    */
 
     /**
      * @dev Returns the state and configuration of the reserve
@@ -975,6 +977,21 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     }
 
     /**
+     * @dev Updates the address of the interest rate strategy contract
+     * - Only callable by the LendingPoolConfigurator contract
+     * @param asset The address of the underlying asset of the reserve
+     * @param rateStrategyAddress The address of the interest rate strategy contract
+     *
+     */
+    function setReserveInterestRateStrategyAddress(address asset, address rateStrategyAddress)
+        external
+        override
+        onlyLendingPoolConfigurator
+    {
+        _reserves[asset].interestRateStrategyAddress = rateStrategyAddress;
+    }
+
+    /**
      * @dev Sets the configuration bitmap of the reserve as a whole
      * - Only callable by the LendingPoolConfigurator contract
      * @param asset The address of the underlying asset of the reserve
@@ -1065,7 +1082,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             oracle
         );
 
-        _updateStates(reserve, address(0), 0, 0, bytes2(1));
+        _updateStates(reserve, address(0), 0, 0, bytes2(uint16(1)));
 
         uint256 currentStableRate = 0;
 
@@ -1086,7 +1103,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             userConfig.setBorrowing(reserve.id, true);
         }
 
-        _updateStates(vars.asset, vars.aTokenAddress, 0, vars.releaseUnderlying ? vars.amount : 0, bytes2(2));
+        _updateStates(reserve, vars.aTokenAddress, 0, vars.releaseUnderlying ? vars.amount : 0, bytes2(uint16(2)));
 
         // TODO instead of releasing the underlying, thinking of minting ATokens that would automatically create
         // a deposit position and users can from a seperate transaction.

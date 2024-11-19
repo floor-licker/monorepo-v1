@@ -7,15 +7,15 @@ import {DataTypes} from "../libraries/types/DataTypes.sol";
 interface ILendingPool {
     /**
      * @dev Emitted on deposit()
-     * @param reserve The address of the underlying asset of the reserve
      * @param user The address initiating the deposit
-     * @param onBehalfOf The beneficiary of the deposit, receiving the aTokens
+     * @param reserve The address of the underlying asset of the reserve
      * @param amount The amount deposited
+     * @param onBehalfOf The beneficiary of the deposit, receiving the aTokens
      * @param referral The referral code used
      *
      */
     event Deposit(
-        address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint16 indexed referral
+        address user, address indexed reserve, uint256 amount, address indexed onBehalfOf, uint16 indexed referral
     );
 
     /**
@@ -31,10 +31,11 @@ interface ILendingPool {
     /**
      * @dev Emitted on borrow() and flashLoan() when debt needs to be opened
      * @param reserve The address of the underlying asset being borrowed
+     * @param amount The amount borrowed out
      * @param user The address of the user initiating the borrow(), receiving the funds on borrow() or just
      * initiator of the transaction on flashLoan()
      * @param onBehalfOf The address that will be getting the debt
-     * @param amount The amount borrowed out
+     * @param sendToChainId The chain id to send the funds to
      * @param borrowRateMode The rate mode: 1 for Stable, 2 for Variable
      * @param borrowRate The numeric rate at which the user has borrowed
      * @param referral The referral code used
@@ -42,10 +43,11 @@ interface ILendingPool {
      */
     event Borrow(
         address indexed reserve,
+        uint256 amount,
         address user,
         address indexed onBehalfOf,
-        uint256 amount,
         uint256 borrowRateMode,
+        uint256 sendToChainId,
         uint256 borrowRate,
         uint16 indexed referral
     );
@@ -53,12 +55,12 @@ interface ILendingPool {
     /**
      * @dev Emitted on repay()
      * @param reserve The address of the underlying asset of the reserve
+     * @param amount The amount repaid
      * @param user The beneficiary of the repayment, getting his debt reduced
      * @param repayer The address of the user initiating the repay(), providing the funds
-     * @param amount The amount repaid
      *
      */
-    event Repay(address indexed reserve, address indexed user, address indexed repayer, uint256 amount);
+    event Repay(address indexed reserve, uint256 amount, address indexed user, address indexed repayer);
 
     /**
      * @dev Emitted on swapBorrowRateMode()
@@ -149,23 +151,49 @@ interface ILendingPool {
     /**
      * @dev Functions to deposit/withdraw into the reserve
      */
-    function deposit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
+    function deposit(
+        address asset,
+        uint256[] calldata amounts,
+        address onBehalfOf,
+        uint16 referralCode,
+        uint256[] calldata chainIds
+    ) external;
 
-    function withdraw(address asset, uint256 amount, address to) external returns (uint256);
+    function withdraw(
+        address asset,
+        uint256[] calldata amounts,
+        address to,
+        uint256 toChainId,
+        uint256[] calldata chainIds
+    ) external;
 
     /**
      * @dev Functions to borrow from the reserve
      */
-    function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
-        external;
+    function borrow(
+        address asset,
+        uint256[] calldata amounts,
+        uint256[] calldata interestRateMode,
+        uint16 referralCode,
+        address onBehalfOf,
+        uint256 sendToChainId,
+        uint256[] calldata chainIds
+    ) external;
 
-    function repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf) external returns (uint256);
+    function repay(
+        address asset,
+        uint256[] calldata amounts,
+        uint256[] calldata rateMode,
+        address onBehalfOf,
+        uint256[] calldata chainIds
+    ) external;
 
     function swapBorrowRateMode(address asset, uint256 rateMode) external;
 
-    function rebalanceStableBorrowRate(address asset, address user) external;
+    function rebalanceStableBorrowRate(address asset, address user, uint256[] calldata chainIds) external;
 
-    function setUserUseReserveAsCollateral(address asset, bool useAsCollateral) external;
+    function setUserUseReserveAsCollateral(address asset, bool[] calldata useAsCollateral, uint256[] calldata chainIds)
+        external;
 
     function liquidationCall(
         address collateralAsset,
@@ -175,11 +203,28 @@ interface ILendingPool {
         bool receiveAToken
     ) external;
 
+    /**
+     * @dev Allows smart contracts to access the liquidity of the pool within one transaction,
+     * as long as the amount taken plus a fee is returned.
+     * @param receiverAddress The address of the contract receiving the funds, implementing IFlashLoanReceiver interface
+     * @param assets The addresses of the assets being flash-borrowed
+     * @param amounts The amounts of the assets being flash-borrowed
+     * @param modes The modes of the debt to open if the flash loan is not returned:
+     *   0: Don't open any debt, just revert if funds can't be transferred from the receiver
+     *   1: Open debt at stable rate for the value of the amount flash-borrowed to the `onBehalfOf` address
+     *   2: Open debt at variable rate for the value of the amount flash-borrowed to the `onBehalfOf` address
+     * @param chainIds The chain IDs where the flash loans should be executed
+     * @param onBehalfOf The address that will receive the debt in the case of using on `modes` 1 or 2
+     * @param params Variadic packed params to pass to the receiver as extra information
+     * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
+     *   0 if the action is executed directly by the user, without any middle-man
+     */
     function flashLoan(
         address receiverAddress,
         address[] calldata assets,
         uint256[] calldata amounts,
         uint256[] calldata modes,
+        uint256[] calldata chainIds,
         address onBehalfOf,
         bytes calldata params,
         uint16 referralCode

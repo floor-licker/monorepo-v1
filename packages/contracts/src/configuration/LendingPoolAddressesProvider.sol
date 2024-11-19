@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: agpl-3.0
-pragma solidity 0.6.12;
+pragma solidity 0.8.25;
 
-import {Ownable} from "../../dependencies/openzeppelin/contracts/Ownable.sol";
+import {Ownable} from "@openzeppelin/contracts-v5/access/Ownable.sol";
 
 // Prettier ignore to prevent buidler flatter bug
 // prettier-ignore
 import {InitializableImmutableAdminUpgradeabilityProxy} from
     "../libraries/aave-upgradeability/InitializableImmutableAdminUpgradeabilityProxy.sol";
 
-import {ILendingPoolAddressesProvider} from "../../interfaces/ILendingPoolAddressesProvider.sol";
+import {ILendingPoolAddressesProvider} from "../interfaces/ILendingPoolAddressesProvider.sol";
 
 /**
  * @title LendingPoolAddressesProvider contract
@@ -30,7 +30,7 @@ contract LendingPoolAddressesProvider is Ownable, ILendingPoolAddressesProvider 
     bytes32 private constant PRICE_ORACLE = "PRICE_ORACLE";
     bytes32 private constant LENDING_RATE_ORACLE = "LENDING_RATE_ORACLE";
 
-    constructor(string memory marketId) public {
+    constructor(string memory marketId, address initialOwner) Ownable(initialOwner) {
         _setMarketId(marketId);
     }
 

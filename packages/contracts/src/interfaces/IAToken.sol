@@ -49,11 +49,13 @@ interface IAToken is IERC20, IScaledBalanceToken, IInitializableAToken {
      * @dev Burns aTokens from `user` and sends the equivalent amount of underlying to `receiverOfUnderlying`
      * @param user The owner of the aTokens, getting them burned
      * @param receiverOfUnderlying The address that will receive the underlying
+     * @param sendToChainId The chain id to send the funds to
      * @param amount The amount being burned
      * @param index The new liquidity index of the reserve
      *
      */
-    function burn(address user, address receiverOfUnderlying, uint256 amount, uint256 index) external;
+    function burn(address user, address receiverOfUnderlying, uint256 sendToChainId, uint256 amount, uint256 index)
+        external;
 
     /**
      * @dev Mints aTokens to the reserve treasury
@@ -76,10 +78,11 @@ interface IAToken is IERC20, IScaledBalanceToken, IInitializableAToken {
      * assets in borrow(), withdraw() and flashLoan()
      * @param user The recipient of the underlying
      * @param amount The amount getting transferred
+     * @param sendToChainId The chain id to send the funds to
      * @return The amount transferred
      *
      */
-    function transferUnderlyingTo(address user, uint256 amount) external returns (uint256);
+    function transferUnderlyingTo(address user, uint256 amount, uint256 sendToChainId) external returns (uint256);
 
     /**
      * @dev Invoked to execute actions on the aToken side after a repayment.

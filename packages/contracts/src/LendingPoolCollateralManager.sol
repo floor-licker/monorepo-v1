@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: agpl-3.0
-pragma solidity 0.6.12;
+pragma solidity 0.8.25;
 
-import {SafeMath} from "../../dependencies/openzeppelin/contracts//SafeMath.sol";
-import {IERC20} from "../../dependencies/openzeppelin/contracts//IERC20.sol";
-import {IAToken} from "../../interfaces/IAToken.sol";
-import {IStableDebtToken} from "../../interfaces/IStableDebtToken.sol";
-import {IVariableDebtToken} from "../../interfaces/IVariableDebtToken.sol";
-import {IPriceOracleGetter} from "../../interfaces/IPriceOracleGetter.sol";
-import {ILendingPoolCollateralManager} from "../../interfaces/ILendingPoolCollateralManager.sol";
-import {VersionedInitializable} from "../libraries/aave-upgradeability/VersionedInitializable.sol";
-import {GenericLogic} from "../libraries/logic/GenericLogic.sol";
-import {Helpers} from "../libraries/helpers/Helpers.sol";
-import {WadRayMath} from "../libraries/math/WadRayMath.sol";
-import {PercentageMath} from "../libraries/math/PercentageMath.sol";
-import {SafeERC20} from "../../dependencies/openzeppelin/contracts/SafeERC20.sol";
-import {Errors} from "../libraries/helpers/Errors.sol";
-import {ValidationLogic} from "../libraries/logic/ValidationLogic.sol";
-import {DataTypes} from "../libraries/types/DataTypes.sol";
+import {IERC20} from "@openzeppelin/contracts-v5/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.sol";
+
+import {IAToken} from "./interfaces/IAToken.sol";
+import {IStableDebtToken} from "./interfaces/IStableDebtToken.sol";
+import {IVariableDebtToken} from "./interfaces/IVariableDebtToken.sol";
+import {IPriceOracleGetter} from "./interfaces/IPriceOracleGetter.sol";
+import {ILendingPoolCollateralManager} from "./interfaces/ILendingPoolCollateralManager.sol";
+
+import {VersionedInitializable} from "./libraries/aave-upgradeability/VersionedInitializable.sol";
+import {GenericLogic} from "./libraries/logic/GenericLogic.sol";
+import {Helpers} from "./libraries/helpers/Helpers.sol";
+import {WadRayMath} from "./libraries/math/WadRayMath.sol";
+import {PercentageMath} from "./libraries/math/PercentageMath.sol";
+import {Errors} from "./libraries/helpers/Errors.sol";
+import {ValidationLogic} from "./libraries/logic/ValidationLogic.sol";
+import {ReserveLogic} from "./libraries/logic/ReserveLogic.sol";
+import {ReserveConfiguration} from "./libraries/configuration/ReserveConfiguration.sol";
+import {UserConfiguration} from "./libraries/configuration/UserConfiguration.sol";
+import {DataTypes} from "./libraries/types/DataTypes.sol";
 import {LendingPoolStorage} from "./LendingPoolStorage.sol";
 
 /**
@@ -29,9 +33,12 @@ import {LendingPoolStorage} from "./LendingPoolStorage.sol";
  */
 contract LendingPoolCollateralManager is ILendingPoolCollateralManager, VersionedInitializable, LendingPoolStorage {
     using SafeERC20 for IERC20;
-    using SafeMath for uint256;
     using WadRayMath for uint256;
     using PercentageMath for uint256;
+
+    using ReserveLogic for DataTypes.ReserveData;
+    using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
+    using UserConfiguration for DataTypes.UserConfigurationMap;
 
     uint256 internal constant LIQUIDATION_CLOSE_FACTOR_PERCENT = 5000;
 
@@ -108,7 +115,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
         vars.userCollateralBalance = vars.collateralAtoken.balanceOf(user);
 
         vars.maxLiquidatableDebt =
-            vars.userStableDebt.add(vars.userVariableDebt).percentMul(LIQUIDATION_CLOSE_FACTOR_PERCENT);
+            (vars.userStableDebt + vars.userVariableDebt).percentMul(LIQUIDATION_CLOSE_FACTOR_PERCENT);
 
         vars.actualDebtToLiquidate = debtToCover > vars.maxLiquidatableDebt ? vars.maxLiquidatableDebt : debtToCover;
 
@@ -141,7 +148,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
             }
         }
 
-        debtReserve.updateState();
+        ReserveLogic.updateState(debtReserve);
 
         if (vars.userVariableDebt >= vars.actualDebtToLiquidate) {
             IVariableDebtToken(debtReserve.variableDebtTokenAddress).burn(
@@ -155,11 +162,13 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
                 );
             }
             IStableDebtToken(debtReserve.stableDebtTokenAddress).burn(
-                user, vars.actualDebtToLiquidate.sub(vars.userVariableDebt)
+                user, vars.actualDebtToLiquidate - vars.userVariableDebt
             );
         }
 
-        debtReserve.updateInterestRates(debtAsset, debtReserve.aTokenAddress, vars.actualDebtToLiquidate, 0);
+        ReserveLogic.updateInterestRates(
+            debtReserve, debtAsset, debtReserve.aTokenAddress, vars.actualDebtToLiquidate, 0
+        );
 
         if (receiveAToken) {
             vars.liquidatorPreviousATokenBalance = IERC20(vars.collateralAtoken).balanceOf(msg.sender);
@@ -176,9 +185,10 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
                 collateralAsset, address(vars.collateralAtoken), 0, vars.maxCollateralToLiquidate
             );
 
+            // TODO: check if this is correct
             // Burn the equivalent amount of aToken, sending the underlying to the liquidator
             vars.collateralAtoken.burn(
-                user, msg.sender, vars.maxCollateralToLiquidate, collateralReserve.liquidityIndex
+                user, msg.sender, block.chainid, vars.maxCollateralToLiquidate, collateralReserve.liquidityIndex
             );
         }
 
@@ -253,14 +263,13 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
 
         // This is the maximum possible amount of the selected collateral that can be liquidated, given the
         // max amount of liquidatable debt
-        vars.maxAmountCollateralToLiquidate = vars.debtAssetPrice.mul(debtToCover).mul(10 ** vars.collateralDecimals)
-            .percentMul(vars.liquidationBonus).div(vars.collateralPrice.mul(10 ** vars.debtAssetDecimals));
+        vars.maxAmountCollateralToLiquidate = (vars.debtAssetPrice * debtToCover * 10 ** vars.collateralDecimals)
+            .percentMul(vars.liquidationBonus) / (vars.collateralPrice * 10 ** vars.debtAssetDecimals);
 
         if (vars.maxAmountCollateralToLiquidate > userCollateralBalance) {
             collateralAmount = userCollateralBalance;
-            debtAmountNeeded = vars.collateralPrice.mul(collateralAmount).mul(10 ** vars.debtAssetDecimals).div(
-                vars.debtAssetPrice.mul(10 ** vars.collateralDecimals)
-            ).percentDiv(vars.liquidationBonus);
+            debtAmountNeeded = (vars.collateralPrice * collateralAmount * 10 ** vars.debtAssetDecimals)
+                / (vars.debtAssetPrice * 10 ** vars.collateralDecimals).percentDiv(vars.liquidationBonus);
         } else {
             collateralAmount = vars.maxAmountCollateralToLiquidate;
             debtAmountNeeded = debtToCover;
