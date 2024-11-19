@@ -45,7 +45,7 @@ import {LendingPoolStorage} from "./LendingPoolStorage.sol";
  * - To be covered by a proxy contract, owned by the LendingPoolAddressesProvider of the specific market
  * - All admin functions are callable by the LendingPoolConfigurator contract defined also in the
  *   LendingPoolAddressesProvider
- * @author Aave
+ * @author tabish.eth (superlend@proton.me)
  *
  */
 contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage {
@@ -58,6 +58,11 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     using UserConfiguration for DataTypes.UserConfigurationMap;
 
     uint256 public constant LENDINGPOOL_REVISION = 0x2;
+
+    error OriginNotLendingPoolConfigurator();
+    error InvalidChainId(uint256 chainId);
+    error InvalidSelector(bytes32 selector);
+    error OriginNotSuperLend();
 
     modifier whenNotPaused() {
         _whenNotPaused();
@@ -108,11 +113,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         _maxNumberOfReserves = 128;
     }
 
-    function dispatch(ICrossL2Inbox.Identifier calldata _identifier, bytes calldata _data)
-        external
-        whenNotPaused
-        onlyRelayer
-    {
+    function dispatch(ICrossL2Inbox.Identifier calldata _identifier, bytes calldata _data) external whenNotPaused {
         if (_identifier.origin != address(this)) revert OriginNotSuperLend();
         ICrossL2Inbox(Predeploys.CROSS_L2_INBOX).validateMessage(_identifier, keccak256(_data));
 
@@ -149,21 +150,29 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
-        /*                    BORROW DISPATCH                       */
+        /*                    BORROW DISPATCH                         */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
-        // TODO think of a better borrow ux
-        if (selector == BorrowInitiated.selector) {
-            if (abi.decode(_data[32:64], (uint256)) != block.chainid) {
-                (address asset, uint256 amount) = abi.decode(_data[128:190], (address, uint256));
-                DataTypes.ReserveData storage reserve = _reserves[asset];
-                _updateStates(reserve, asset, 0, amount, bytes2(3));
-            } else {
-                borrow(_data[96:]);
-            }
+
+        if (selector == Borrow.selector && _identifier.chainId != block.chainid) {
+            (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
+            DataTypes.ReserveData storage reserve = _reserves[asset];
+            _updateStates(reserve, asset, 0, amount, bytes2(3));
+        }
+        if (selector == CrossChainBorrow.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
+            (
+                uint256 sendToChainId,
+                address sender,
+                address asset,
+                uint256 amount,
+                uint256 interestRateMode,
+                address onBehalfOf,
+                uint16 referralCode
+            ) = abi.decode(_data[96:], (uint256, address, address, uint256, uint256, address, uint16));
+            _borrow(sender, asset, amount, interestRateMode, onBehalfOf, sendToChainId, referralCode);
         }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
-        /*                    REPAY DISPATCH                       */
+        /*                    REPAY DISPATCH                          */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == Repay.selector && _identifier.chainId != block.chainid) {
@@ -178,13 +187,13 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
-        /*                    FLASHLOAN DISPATCH                       */
+        /*                    FLASHLOAN DISPATCH                      */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == FlashLoanInitiated.selector) flashLoan(_data[96:]);
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
-        /*                    REBALANCE DISPATCH                       */
+        /*                    REBALANCE DISPATCH                      */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == RebalanceStableBorrowRate.selector && _identifier.chainId != block.chainid) {
@@ -229,12 +238,12 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         uint16 referralCode,
         uint256[] calldata chainIds
     ) external override whenNotPaused {
-        // Handle deposit on current chain
-        _deposit(msg.sender, asset, amounts[0], onBehalfOf, referralCode);
-
-        // Emit events for cross-chain deposits
-        for (uint256 i = 1; i < chainIds.length; i++) {
-            emit CrossChainDeposit(chainIds[i], msg.sender, asset, amounts[i], onBehalfOf, referralCode);
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            if (chainIds[i] == block.chainid) {
+                _deposit(msg.sender, asset, amounts[i], onBehalfOf, referralCode);
+            } else {
+                emit CrossChainDeposit(chainIds[i], msg.sender, asset, amounts[i], onBehalfOf, referralCode);
+            }
         }
     }
 
@@ -265,55 +274,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         uint256 toChainId, address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode
     );
 
-    // called when deposit is initiated but doesn't make it through.
-    // users can release the deposited funds.
-    function releaseWithdraw(address asset, uint256 amount) external {
-        uint256 storage _initiatedDepositAmount = initiatedDepositAmount[msg.sender][asset];
-        if (amount > _initiatedDepositAmount) revert InvalidAmount();
-        _initiatedDepositAmount -= amount;
-
-        emit AssetsReleased(msg.sender, asset, amount);
-    }
-
-    /**
-     * @dev Deposits an `amount` of underlying asset into the reserve, receiving in return overlying aTokens.
-     * - E.g. User deposits 100 USDC and gets in return 100 aUSDC
-     * @param asset The address of the underlying asset to deposit
-     * @param amount The amount to be deposited
-     * @param onBehalfOf The address that will receive the aTokens, same as msg.sender if the user
-     *   wants to receive them on his own wallet, or a different address if the beneficiary of aTokens
-     *   is a different wallet
-     * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
-     *   0 if the action is executed directly by the user, without any middle-man
-     *
-     */
-    function deposit(bytes _data) internal override {
-        (address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode) =
-            abi.decode(_data, (address, address, uint256, address, uint16));
-
-        DataTypes.ReserveData storage reserve = _reserves[asset];
-        address aToken = reserve.aTokenAddress;
-
-        /// @dev check if the deposit is initiated
-        uint256 storage _initiatedDepositAmount = initiatedDepositAmount[sender][asset];
-        if (amount > _initiatedDepositAmount) revert InvalidAmount();
-        _initiatedDepositAmount -= amount;
-
-        ValidationLogic.validateDeposit(reserve, amount);
-
-        _updateStates(reserve, asset, amount, 0, bytes2(3));
-
-        IERC20(asset).safeTransferFrom(msg.sender, aToken, amount);
-
-        bool isFirstDeposit = IAToken(aToken).mint(onBehalfOf, amount, reserve.liquidityIndex);
-        if (isFirstDeposit) {
-            _usersConfig[onBehalfOf].setUsingAsCollateral(reserve.id, true);
-            emit ReserveUsedAsCollateralEnabled(asset, onBehalfOf);
-        }
-
-        emit Deposit(asset, sender, onBehalfOf, amount, referralCode);
-    }
-
     function _updateStates(
         DataTypes.ReserveData storage reserve,
         address asset,
@@ -325,48 +285,39 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (mask >> 2) reserve.updateInterestRates(asset, reserve.aTokenAddress, depositAmount, withdrawAmount);
     }
 
-    event CrossChainWithdraw(uint256 toChainId, address sender, address asset, uint256 amount, address to);
+    event CrossChainWithdraw(
+        uint256 fromChainId, address sender, address asset, uint256 amount, address to, uint256 toChainId
+    );
 
     /**
      * @dev Withdraws an `amount` of underlying asset from the reserve, burning the equivalent aTokens owned
-     * E.g. User has 100 aUSDC, calls withdraw() and receives 100 USDC, burning the 100 aUSDC
      * @param asset The address of the underlying asset to withdraw
-     * @param amounts The underlying amount to be withdrawn
-     *   - Send the value type(uint256).max in order to withdraw the whole aToken balance
-     * @param to Address that will receive the underlying, same as msg.sender if the user
-     *   wants to receive it on his own wallet, or a different address if the beneficiary is a
-     *   different wallet
-     * @param chainIds if the withdraw requires multiple chains, the chain ids to withdraw from
+     * @param amounts Array of amounts to withdraw per chain
+     * @param to Address that will receive the underlying
+     * @param chainIds Array of chain IDs where the withdrawals should be made
      */
-    // TODO increase the usuability of function more
-
-    function withdraw(address asset, uint256[] calldata amounts, address to, uint256[] calldata chainIds)
-        external
-        override
-        whenNotPaused
-    {
-        // TODO add required checks
-        _withdraw(msg.sender, asset, amounts[0], to, block.chainid);
-        for (uint256 i = 1; i < chainIds.length; i++) {
-            emit CrossChainWithdraw(chainIds[i], msg.sender, asset, amounts[i], to);
+    function withdraw(
+        address asset,
+        uint256[] calldata amounts,
+        address to,
+        uint256 toChainId,
+        uint256[] calldata chainIds
+    ) external override whenNotPaused {
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            if (chainIds[i] == block.chainid) {
+                _withdraw(msg.sender, asset, amounts[i], to, toChainId);
+            } else {
+                emit CrossChainWithdraw(chainIds[i], msg.sender, asset, amounts[i], to, toChainId);
+            }
         }
     }
 
-    function _withdraw(address sender, address asset, uint256[] calldata amounts, address to, address toChainId)
-        internal
-        returns (uint256)
-    {
+    function _withdraw(address sender, address asset, uint256 amount, address to, uint256 toChainId) internal {
         DataTypes.ReserveData storage reserve = _reserves[asset];
-
         address aToken = reserve.aTokenAddress;
 
         uint256 userBalance = IAToken(aToken).balanceOf(sender);
-
-        uint256 amountToWithdraw = amounts[0];
-
-        if (amount == type(uint256).max) {
-            amountToWithdraw = userBalance;
-        }
+        uint256 amountToWithdraw = amount == type(uint256).max ? userBalance : amount;
 
         ValidationLogic.validateWithdraw(
             asset,
@@ -386,86 +337,84 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             emit ReserveUsedAsCollateralDisabled(asset, sender);
         }
 
-        // TODO do a cross chain burn here
-        // so that the aTokens are burned and the underlying is released on toChainId
-        // also unwrap the assets here from SuperChain token to the underlying asset
-        IAToken(aToken).burn(sender, to, amountToWithdraw, reserve.liquidityIndex, toChainId);
+        IAToken(aToken).burn(sender, to, toChainId, amountToWithdraw, reserve.liquidityIndex);
 
         emit Withdraw(sender, asset, to, amountToWithdraw);
     }
 
     /**
-     * @dev Allows users to borrow a specific `amount` of the reserve underlying asset, provided that the borrower
-     * already deposited enough collateral, or he was given enough allowance by a credit delegator on the
-     * corresponding debt token (StableDebtToken or VariableDebtToken)
-     * - E.g. User borrows 100 USDC passing as `onBehalfOf` his own address, receiving the 100 USDC in his wallet
-     *   and 100 stable/variable debt tokens, depending on the `interestRateMode`
+     * @dev Allows users to borrow across multiple chains, provided they have enough collateral
      * @param asset The address of the underlying asset to borrow
-     * @param amount The amount to be borrowed
-     * @param interestRateMode The interest rate mode at which the user wants to borrow: 1 for Stable, 2 for Variable
-     * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
-     *   0 if the action is executed directly by the user, without any middle-man
-     * @param onBehalfOf Address of the user who will receive the debt. Should be the address of the borrower itself
-     * calling the function if he wants to borrow against his own collateral, or the address of the credit delegator
-     * if he has been given credit delegation allowance
-     *
+     * @param amounts Array of amounts to borrow per chain
+     * @param interestRateMode The interest rate mode: 1 for Stable, 2 for Variable
+     * @param referralCode Code used to register the integrator originating the operation
+     * @param onBehalfOf Address that will receive the debt
+     * @param chainIds Array of chain IDs where to borrow from
      */
-    function initiateBorrow(
+    function borrow(
+        address asset,
+        uint256[] calldata amounts,
+        uint256[] calldata interestRateMode,
+        uint16 referralCode,
+        address onBehalfOf,
+        uint256 sendToChainId,
+        uint256[] calldata chainIds
+    ) external override whenNotPaused {
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            if (chainIds[i] == block.chainid) {
+                _borrow(msg.sender, asset, amounts[i], interestRateMode[i], onBehalfOf, sendToChainId, referralCode);
+            } else {
+                emit CrossChainBorrow(
+                    chainIds[i],
+                    sendToChainId,
+                    msg.sender,
+                    asset,
+                    amounts[i],
+                    interestRateMode[i],
+                    onBehalfOf,
+                    referralCode
+                );
+            }
+        }
+    }
+
+    function _borrow(
+        address sender,
         address asset,
         uint256 amount,
         uint256 interestRateMode,
-        uint16 referralCode,
-        address onBehalfOf
-    ) {
-        // TODO TO-THINK actually we dont need prevalidation for borrow, if we dont prevalidate the then we can't batch all call in one transaction
-        // but maybe that's better
-
-        // DataTypes.ReserveData storage reserve = _reserves[vars.asset];
-        // DataTypes.UserConfigurationMap storage userConfig = _usersConfig[vars.onBehalfOf];
-
-        // address oracle = _addressesProvider.getPriceOracle();
-
-        // uint256 amountInETH = IPriceOracleGetter(oracle).getAssetPrice(vars.asset) * vars.amount
-        //     / 10 ** reserve.configuration.getDecimals();
-
-        // ValidationLogic.validateBorrow(
-        //     vars.asset,
-        //     reserve,
-        //     vars.onBehalfOf,
-        //     vars.amount,
-        //     amountInETH,
-        //     vars.interestRateMode,
-        //     _maxStableRateBorrowSizePercent,
-        //     _reserves,
-        //     userConfig,
-        //     _reservesList,
-        //     _reservesCount,
-        //     oracle
-        // );
-
-        emit BorrowInitiated(
-            block.chainid, block.timestamp, msg.sender, asset, amount, interestRateMode, onBehalfOf, referralCode
-        );
-    }
-
-    function borrow(bytes _data) internal override {
-        (
-            address sender,
-            address asset,
-            uint256 amount,
-            uint256 interestRateMode,
-            address onBehalfOf,
-            uint16 referralCode
-        ) = abi.decode(_data, (address, address, uint256, uint256, address, uint16));
-
+        address onBehalfOf,
+        uint256 sendToChainId,
+        uint16 referralCode
+    ) internal {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
         _executeBorrow(
             ExecuteBorrowParams(
-                asset, sender, onBehalfOf, amount, interestRateMode, reserve.aTokenAddress, referralCode, true
+                asset,
+                sender,
+                onBehalfOf,
+                sendToChainId,
+                amount,
+                interestRateMode,
+                reserve.aTokenAddress,
+                referralCode,
+                true
             )
         );
     }
+
+    // Add new event for cross-chain borrows
+    event CrossChainBorrow(
+        uint256 borrowFromChainId,
+        uint256 sendToChainId,
+        address sender,
+        address asset,
+        uint256 amount,
+        uint256 interestRateMode,
+        address onBehalfOf,
+        uint16 referralCode
+    );
 
     /**
      * @dev Repays a borrowed `amount` on a specific reserve across multiple chains, burning the equivalent debt tokens owned
@@ -483,14 +432,15 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         address onBehalfOf,
         uint256[] calldata chainIds
     ) external override whenNotPaused {
-        _repay(asset, amounts[0], rateMode[0], onBehalfOf);
-
         for (uint256 i = 1; i < chainIds.length; i++) {
             // TODO wrap the assets here and send to the lending pool on the chain
-
-            emit CrossChainRepay(
-                block.chainid, chainIds[i], block.timestamp, msg.sender, asset, amounts[i], rateMode, onBehalfOf
-            );
+            if (chainIds[i] == block.chainid) {
+                _repay(asset, amounts[i], rateMode[i], onBehalfOf);
+            } else {
+                emit CrossChainRepay(
+                    block.chainid, chainIds[i], block.timestamp, msg.sender, asset, amounts[i], rateMode[i], onBehalfOf
+                );
+            }
         }
     }
 
@@ -650,9 +600,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         }
     }
 
-    function _setUserUseReserveAsCollateral(address sender, address user, address asset, bool useAsCollateral)
-        internal
-    {
+    function _setUserUseReserveAsCollateral(address sender, address asset, bool useAsCollateral) internal {
         DataTypes.ReserveData storage reserve = _reserves[asset];
 
         ValidationLogic.validateSetUseReserveAsCollateral(
@@ -1085,6 +1033,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         address asset;
         address user;
         address onBehalfOf;
+        uint256 sendToChainId;
         uint256 amount;
         uint256 interestRateMode;
         address aTokenAddress;
@@ -1142,14 +1091,15 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         // TODO instead of releasing the underlying, thinking of minting ATokens that would automatically create
         // a deposit position and users can from a seperate transaction.
         if (vars.releaseUnderlying) {
-            IAToken(vars.aTokenAddress).transferUnderlyingTo(vars.user, vars.amount);
+            IAToken(vars.aTokenAddress).transferUnderlyingTo(vars.user, vars.amount, vars.sendToChainId);
         }
 
         emit Borrow(
             vars.asset,
+            vars.amount,
             vars.user,
             vars.onBehalfOf,
-            vars.amount,
+            vars.sendToChainId,
             vars.interestRateMode,
             DataTypes.InterestRateMode(vars.interestRateMode) == DataTypes.InterestRateMode.STABLE
                 ? currentStableRate

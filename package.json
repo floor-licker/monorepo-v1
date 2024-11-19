@@ -19,6 +19,7 @@
     "mprocs": "^0.7.1",
     "nx": "^20.0.7",
     "prettier": "^3.3.3",
+    "prettier-plugin-solidity": "^1.4.1",
     "supersim": "^0.0.5",
     "wait-port": "^1.1.0"
   }
