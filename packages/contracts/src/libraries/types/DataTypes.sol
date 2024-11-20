@@ -11,6 +11,7 @@ library DataTypes {
         uint128 currentStableBorrowRate;
         uint40 lastUpdateTimestamp;
         address aTokenAddress;
+        address superchainAssetAddress;
         address stableDebtTokenAddress;
         address variableDebtTokenAddress;
         address interestRateStrategyAddress;

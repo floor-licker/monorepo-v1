@@ -274,12 +274,13 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     {
         DataTypes.ReserveData storage reserve = _reserves[asset];
         address aToken = reserve.aTokenAddress;
+        address superchainAsset = reserve.superchainAssetAddress;
 
         ValidationLogic.validateDeposit(reserve, amount);
 
         _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
-
-        IERC20(asset).safeTransferFrom(sender, aToken, amount);
+        
+        ISuperchainAsset(superchainAsset).mint(aToken, amount);
 
         bool isFirstDeposit = IAToken(aToken).mint(onBehalfOf, amount, reserve.liquidityIndex);
 
@@ -293,7 +294,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     // Update the DepositInitiated event to include chain IDs
     event CrossChainDeposit(
-        uint256 toChainId, address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode
+        uint256 fromChainId, address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode
     );
 
     bytes2 private constant UPDATE_STATE_MASK = bytes2(uint16(1));
@@ -460,10 +461,17 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         uint256[] calldata chainIds
     ) external override whenNotPaused {
         for (uint256 i = 1; i < chainIds.length; i++) {
-            // TODO wrap the assets here and send to the lending pool on the chain
+            ISuperchainAsset(_reserves[asset].superchainAssetAddress).mint(msg.sender, amounts[i]);
             if (chainIds[i] == block.chainid) {
                 _repay(msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             } else {
+                // TODO: THINK more about this: here extra amount sent will be kept as superchainAsset on the destination chain
+                ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
+                    _reserves[asset].superchainAssetAddress,
+                    msg.sender,
+                    amounts[i],
+                    chainIds[i]
+                );
                 emit CrossChainRepay(chainIds[i], msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             }
         }
@@ -471,6 +479,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
     function _repay(address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf) internal {
         DataTypes.ReserveData storage reserve = _reserves[asset];
+        address superchainAsset = reserve.superchainAssetAddress;
 
         /// @dev this will get the debt of the user on the current chain
         (uint256 stableDebt, uint256 variableDebt) = Helpers.getUserCurrentDebt(onBehalfOf, reserve);
@@ -501,8 +510,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             _usersConfig[onBehalfOf].setBorrowing(reserve.id, false);
         }
 
-        // TODO unwrap the assets here from SuperChain token to the underlying asset
-        IERC20(asset).safeTransfer(aToken, paybackAmount);
+        IERC20(superchainAsset).safeTransferFrom(sender, aToken, paybackAmount);
 
         IAToken(aToken).handleRepayment(sender, paybackAmount);
 
@@ -1149,8 +1157,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
         _updateStates(reserve, vars.aTokenAddress, 0, vars.releaseUnderlying ? vars.amount : 0, bytes2(uint16(2)));
 
-        // TODO instead of releasing the underlying, thinking of minting ATokens that would automatically create
-        // a deposit position and users can from a seperate transaction.
         if (vars.releaseUnderlying) {
             IAToken(vars.aTokenAddress).transferUnderlyingTo(vars.user, vars.amount, vars.sendToChainId);
         }
