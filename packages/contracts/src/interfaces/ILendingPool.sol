@@ -199,7 +199,8 @@ interface ILendingPool {
         address collateralAsset,
         address debtAsset,
         address user,
-        uint256 debtToCover,
+        uint256[] calldata debtToCover,
+        uint256[] calldata chainIds,
         bool receiveAToken
     ) external;
 

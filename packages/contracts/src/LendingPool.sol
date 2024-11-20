@@ -188,6 +188,27 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
+        /*                    LIQUIDATION CALL DISPATCH               */
+        /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
+
+        if (selector == LiquidationCall.selector && _identifier.chainId != block.chainid) {
+            (address collateralAsset, address debtAsset,, uint256 actualDebtToLiquidate, uint256 maxCollateralToLiquidate, bool receiveAToken) =
+                abi.decode(_data[64:], (address, address, address, uint256, uint256, bool));
+            DataTypes.ReserveData storage debtReserve = _reserves[debtAsset];
+            _updateStates(debtReserve, debtAsset, 0, actualDebtToLiquidate, bytes2(uint16(3)));
+            if (!receiveAToken) {
+                DataTypes.ReserveData storage collateralReserve = _reserves[collateralAsset];
+                collateralReserve.updateState();
+                collateralReserve.updateInterestRates(collateralAsset, collateralReserve.aTokenAddress, 0, maxCollateralToLiquidate);
+            }
+        }
+        if (selector == CrossChainLiquidationCall.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
+            (address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken) =
+                abi.decode(_data[64:], (address, address, address, address, uint256, bool));
+            _liquidationCall(sender, collateralAsset, debtAsset, user, debtToCover, receiveAToken);
+        }
+
+        /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
         /*                    FLASHLOAN DISPATCH                      */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
@@ -627,6 +648,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     // Add new event for cross-chain collateral settings
     event SetUserUseReserveAsCollateralCrossChain(uint256 chainId, address user, address asset, bool useAsCollateral);
 
+
     /**
      * @dev Function to liquidate a non-healthy position collateral-wise, with Health Factor below 1
      * - The caller (liquidator) covers `debtToCover` amount of debt of the user getting liquidated, and receives
@@ -634,7 +656,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      * @param collateralAsset The address of the underlying asset used as collateral, to receive as result of the liquidation
      * @param debtAsset The address of the underlying borrowed asset to be repaid with the liquidation
      * @param user The address of the borrower getting liquidated
-     * @param debtToCover The debt amount of borrowed `asset` the liquidator wants to cover
+     * @param debtToCover The debt amount of borrowed `asset` the liquidator wants to cover, from each chain
+     * @param chainIds Array of chain IDs where the liquidation should be executed
      * @param receiveAToken `true` if the liquidators wants to receive the collateral aTokens, `false` if he wants
      * to receive the underlying collateral asset directly
      *
@@ -643,15 +666,36 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         address collateralAsset,
         address debtAsset,
         address user,
-        uint256 debtToCover,
+        uint256[] calldata debtToCover,
+        uint256[] calldata chainIds,
         bool receiveAToken
     ) external override whenNotPaused {
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            if (chainIds[i] == block.chainid) {
+                _liquidationCall(msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken);
+            } else {
+                emit CrossChainLiquidationCall(chainIds[i], msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken);
+            }
+        }
+    }
+
+    event CrossChainLiquidationCall(uint256 chainId, address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken);
+
+    function _liquidationCall(
+        address sender,
+        address collateralAsset,
+        address debtAsset,
+        address user,
+        uint256 debtToCover,
+        bool receiveAToken
+    ) internal {
         address collateralManager = _addressesProvider.getLendingPoolCollateralManager();
 
         //solium-disable-next-line
         (bool success, bytes memory result) = collateralManager.delegatecall(
             abi.encodeWithSignature(
-                "liquidationCall(address,address,address,uint256,bool)",
+                "liquidationCall(address,address,address,address,uint256,bool)",
+                sender,
                 collateralAsset,
                 debtAsset,
                 user,

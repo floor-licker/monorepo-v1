@@ -10,6 +10,7 @@ pragma solidity 0.8.25;
 interface ILendingPoolCollateralManager {
     /**
      * @dev Emitted when a borrower is liquidated
+     * @param sender The address of the sender
      * @param collateral The address of the collateral being liquidated
      * @param principal The address of the reserve
      * @param user The address of the user being liquidated
@@ -20,6 +21,7 @@ interface ILendingPoolCollateralManager {
      *
      */
     event LiquidationCall(
+        address sender,
         address indexed collateral,
         address indexed principal,
         address indexed user,
@@ -47,6 +49,7 @@ interface ILendingPoolCollateralManager {
 
     /**
      * @dev Users can invoke this function to liquidate an undercollateralized position.
+     * @param sender The address of the sender
      * @param collateral The address of the collateral to liquidated
      * @param principal The address of the principal reserve
      * @param user The address of the borrower
@@ -56,6 +59,7 @@ interface ILendingPoolCollateralManager {
      *
      */
     function liquidationCall(
+        address sender,
         address collateral,
         address principal,
         address user,

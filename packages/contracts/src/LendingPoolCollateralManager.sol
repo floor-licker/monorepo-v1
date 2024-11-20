@@ -75,6 +75,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
      * @dev Function to liquidate a position if its Health Factor drops below 1
      * - The caller (liquidator) covers `debtToCover` amount of debt of the user getting liquidated, and receives
      *   a proportionally amount of the `collateralAsset` plus a bonus to cover market risk
+     * @param sender The address of the sender
      * @param collateralAsset The address of the underlying asset used as collateral, to receive as result of the liquidation
      * @param debtAsset The address of the underlying borrowed asset to be repaid with the liquidation
      * @param user The address of the borrower getting liquidated
@@ -84,6 +85,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
      *
      */
     function liquidationCall(
+        address sender,
         address collateralAsset,
         address debtAsset,
         address user,
@@ -171,13 +173,13 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
         );
 
         if (receiveAToken) {
-            vars.liquidatorPreviousATokenBalance = IERC20(vars.collateralAtoken).balanceOf(msg.sender);
-            vars.collateralAtoken.transferOnLiquidation(user, msg.sender, vars.maxCollateralToLiquidate);
+            vars.liquidatorPreviousATokenBalance = IERC20(vars.collateralAtoken).balanceOf(sender);
+            vars.collateralAtoken.transferOnLiquidation(user, sender, vars.maxCollateralToLiquidate);
 
             if (vars.liquidatorPreviousATokenBalance == 0) {
-                DataTypes.UserConfigurationMap storage liquidatorConfig = _usersConfig[msg.sender];
+                DataTypes.UserConfigurationMap storage liquidatorConfig = _usersConfig[sender];
                 liquidatorConfig.setUsingAsCollateral(collateralReserve.id, true);
-                emit ReserveUsedAsCollateralEnabled(collateralAsset, msg.sender);
+                emit ReserveUsedAsCollateralEnabled(collateralAsset, sender);
             }
         } else {
             collateralReserve.updateState();
@@ -185,10 +187,9 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
                 collateralAsset, address(vars.collateralAtoken), 0, vars.maxCollateralToLiquidate
             );
 
-            // TODO: check if this is correct
-            // Burn the equivalent amount of aToken, sending the underlying to the liquidator
+            // TODO check
             vars.collateralAtoken.burn(
-                user, msg.sender, block.chainid, vars.maxCollateralToLiquidate, collateralReserve.liquidityIndex
+                user, sender, block.chainid, vars.maxCollateralToLiquidate, collateralReserve.liquidityIndex
             );
         }
 
@@ -200,15 +201,16 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
         }
 
         // Transfers the debt asset being repaid to the aToken, where the liquidity is kept
-        IERC20(debtAsset).safeTransferFrom(msg.sender, debtReserve.aTokenAddress, vars.actualDebtToLiquidate);
+        IERC20(debtAsset).safeTransferFrom(sender, debtReserve.aTokenAddress, vars.actualDebtToLiquidate);
 
         emit LiquidationCall(
+            sender,
             collateralAsset,
             debtAsset,
             user,
             vars.actualDebtToLiquidate,
             vars.maxCollateralToLiquidate,
-            msg.sender,
+            sender,
             receiveAToken
         );
 
