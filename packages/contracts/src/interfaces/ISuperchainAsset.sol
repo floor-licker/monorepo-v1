@@ -4,7 +4,6 @@ pragma solidity ^0.8.25;
 /// @title ISuperchainAsset Interface
 /// @notice Interface for interacting with the SuperchainAsset contract
 interface ISuperchainAsset {
-    
     /// @notice Get the name of the asset
     /// @return The name of the asset as a string
     function name() external view returns (string memory);
@@ -39,4 +38,4 @@ interface ISuperchainAsset {
     /// @param amount The amount of tokens to transfer
     /// @return A boolean indicating whether the operation was successful
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-} 
+}

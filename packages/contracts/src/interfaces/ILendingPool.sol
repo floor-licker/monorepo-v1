@@ -97,20 +97,24 @@ interface ILendingPool {
 
     /**
      * @dev Emitted on flashLoan()
-     * @param target The address of the flash loan receiver contract
+     * @param chainId The chain id
+     * @param borrowExecuted Whether the borrow was executed
      * @param initiator The address initiating the flash loan
      * @param asset The address of the asset being flash borrowed
      * @param amount The amount flash borrowed
      * @param premium The fee flash borrowed
+     * @param target The address of the flash loan receiver contract
      * @param referralCode The referral code used
      *
      */
     event FlashLoan(
-        address indexed target,
+        uint256 chainId,
+        bool borrowExecuted,
         address indexed initiator,
         address indexed asset,
         uint256 amount,
         uint256 premium,
+        address indexed target,
         uint16 referralCode
     );
 
@@ -205,33 +209,6 @@ interface ILendingPool {
         uint256[] calldata chainIds,
         bool receiveAToken,
         uint256 sendToChainId
-    ) external;
-
-    /**
-     * @dev Allows smart contracts to access the liquidity of the pool within one transaction,
-     * as long as the amount taken plus a fee is returned.
-     * @param receiverAddress The address of the contract receiving the funds, implementing IFlashLoanReceiver interface
-     * @param assets The addresses of the assets being flash-borrowed
-     * @param amounts The amounts of the assets being flash-borrowed
-     * @param modes The modes of the debt to open if the flash loan is not returned:
-     *   0: Don't open any debt, just revert if funds can't be transferred from the receiver
-     *   1: Open debt at stable rate for the value of the amount flash-borrowed to the `onBehalfOf` address
-     *   2: Open debt at variable rate for the value of the amount flash-borrowed to the `onBehalfOf` address
-     * @param chainIds The chain IDs where the flash loans should be executed
-     * @param onBehalfOf The address that will receive the debt in the case of using on `modes` 1 or 2
-     * @param params Variadic packed params to pass to the receiver as extra information
-     * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
-     *   0 if the action is executed directly by the user, without any middle-man
-     */
-    function flashLoan(
-        address receiverAddress,
-        address[] calldata assets,
-        uint256[] calldata amounts,
-        uint256[] calldata modes,
-        uint256[] calldata chainIds,
-        address onBehalfOf,
-        bytes calldata params,
-        uint16 referralCode
     ) external;
 
     function getUserAccountData(address user)

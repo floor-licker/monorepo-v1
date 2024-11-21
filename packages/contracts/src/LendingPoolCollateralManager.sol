@@ -189,9 +189,13 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
             emit ReserveUsedAsCollateralDisabled(collateralAsset, user);
         }
 
-        ISuperchainAsset(debtReserve.superchainAssetAddress).transfer(debtReserve.aTokenAddress, vars.actualDebtToLiquidate);
+        ISuperchainAsset(debtReserve.superchainAssetAddress).transfer(
+            debtReserve.aTokenAddress, vars.actualDebtToLiquidate
+        );
         if (debtToCover > vars.actualDebtToLiquidate) {
-            ISuperchainAsset(debtReserve.superchainAssetAddress).transfer(sender, debtToCover - vars.actualDebtToLiquidate);
+            ISuperchainAsset(debtReserve.superchainAssetAddress).transfer(
+                sender, debtToCover - vars.actualDebtToLiquidate
+            );
         }
 
         emit LiquidationCall(

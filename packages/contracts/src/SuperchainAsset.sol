@@ -37,11 +37,11 @@ contract SuperchainAsset is SuperchainERC20 {
     function decimals() public view override returns (uint8) {
         return _decimals;
     }
-    
+
     /// @dev minting more than totalBalances will mint aToken and transfer underlying
     /// only callable by SuperchainTokenBridge (which has already burned the aToken amount on source chain)
     function _mint(address to_, uint256 amount_) internal override {
-        if(amount_ > totalBalances) {
+        if (amount_ > totalBalances) {
             /// TODO gas optimize this
             // need to mint more than totalBalances
             balances[to_] += amount_ - totalBalances;

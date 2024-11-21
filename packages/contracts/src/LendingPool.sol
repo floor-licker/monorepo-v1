@@ -13,7 +13,7 @@ import {IPriceOracleGetter} from "./interfaces/IPriceOracleGetter.sol";
 import {IStableDebtToken} from "./interfaces/IStableDebtToken.sol";
 import {ILendingPool} from "./interfaces/ILendingPool.sol";
 import {ISuperchainAsset} from "./interfaces/ISuperchainAsset.sol";
-import {ISuperchainTokenBridge} from '@contracts-bedrock/L2/interfaces/ISuperchainTokenBridge.sol';
+import {ISuperchainTokenBridge} from "@contracts-bedrock/L2/interfaces/ISuperchainTokenBridge.sol";
 import {ISemver} from "@contracts-bedrock/universal/interfaces/ISemver.sol";
 import {ICrossL2Inbox} from "@contracts-bedrock/L2/interfaces/ICrossL2Inbox.sol";
 
@@ -193,19 +193,34 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == LiquidationCall.selector && _identifier.chainId != block.chainid) {
-            (address collateralAsset, address debtAsset,, uint256 actualDebtToLiquidate, uint256 maxCollateralToLiquidate, bool receiveAToken) =
-                abi.decode(_data[64:], (address, address, address, uint256, uint256, bool));
+            (
+                address collateralAsset,
+                address debtAsset,
+                ,
+                uint256 actualDebtToLiquidate,
+                uint256 maxCollateralToLiquidate,
+                bool receiveAToken
+            ) = abi.decode(_data[64:], (address, address, address, uint256, uint256, bool));
             DataTypes.ReserveData storage debtReserve = _reserves[debtAsset];
             _updateStates(debtReserve, debtAsset, 0, actualDebtToLiquidate, bytes2(uint16(3)));
             if (!receiveAToken) {
                 DataTypes.ReserveData storage collateralReserve = _reserves[collateralAsset];
                 collateralReserve.updateState();
-                collateralReserve.updateInterestRates(collateralAsset, collateralReserve.aTokenAddress, 0, maxCollateralToLiquidate);
+                collateralReserve.updateInterestRates(
+                    collateralAsset, collateralReserve.aTokenAddress, 0, maxCollateralToLiquidate
+                );
             }
         }
         if (selector == CrossChainLiquidationCall.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
-            (address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken, uint256 sendToChainId) =
-                abi.decode(_data[64:], (address, address, address, address, uint256, bool, uint256));
+            (
+                address sender,
+                address collateralAsset,
+                address debtAsset,
+                address user,
+                uint256 debtToCover,
+                bool receiveAToken,
+                uint256 sendToChainId
+            ) = abi.decode(_data[64:], (address, address, address, address, uint256, bool, uint256));
             _liquidationCall(sender, collateralAsset, debtAsset, user, debtToCover, receiveAToken, sendToChainId);
         }
 
@@ -213,7 +228,27 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*                    FLASHLOAN DISPATCH                      */
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-        // if (selector == FlashLoanInitiated.selector) flashLoan(_data[96:]);
+        if (
+            selector == FlashLoan.selector && abi.decode(_data[32:64], (uint256)) != block.chainid
+                && abi.decode(_data[64:96], (bool))
+        ) {
+            (, address asset, uint256 amount) = abi.decode(_data[96:160], (address, address, uint256));
+            DataTypes.ReserveData storage reserve = _reserves[asset];
+            _updateStates(reserve, asset, 0, amount, bytes2(uint16(3)));
+        }
+        if (selector == InitiateFlashLoanCrossChain.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
+            (
+                address sender,
+                address receiverAddress,
+                address[] memory assets,
+                uint256[] memory amounts,
+                uint256[] memory modes,
+                address onBehalfOf,
+                bytes memory params,
+                uint16 referralCode
+            ) = abi.decode(_data[96:], (address, address, address[], uint256[], uint256[], address, bytes, uint16));
+            _flashLoan(sender, receiverAddress, assets, amounts, modes, onBehalfOf, params, referralCode);
+        }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
         /*                    REBALANCE DISPATCH                      */
@@ -280,7 +315,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         ValidationLogic.validateDeposit(reserve, amount);
 
         _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
-        
+
         ISuperchainAsset(superchainAsset).mint(aToken, amount);
 
         bool isFirstDeposit = IAToken(aToken).mint(onBehalfOf, amount, reserve.liquidityIndex);
@@ -469,10 +504,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
                 _repay(msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             } else {
                 ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
-                    _reserves[asset].superchainAssetAddress,
-                    address(this),
-                    amounts[i],
-                    chainIds[i]
+                    _reserves[asset].superchainAssetAddress, address(this), amounts[i], chainIds[i]
                 );
                 emit CrossChainRepay(chainIds[i], msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             }
@@ -666,7 +698,6 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     // Add new event for cross-chain collateral settings
     event SetUserUseReserveAsCollateralCrossChain(uint256 chainId, address user, address asset, bool useAsCollateral);
 
-
     /**
      * @dev Function to liquidate a non-healthy position collateral-wise, with Health Factor below 1
      * - The caller (liquidator) covers `debtToCover` amount of debt of the user getting liquidated, and receives
@@ -696,20 +727,37 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         ISuperchainAsset(_reserves[debtAsset].superchainAssetAddress).mint(address(this), totalDebtToCover);
         for (uint256 i = 0; i < chainIds.length; i++) {
             if (chainIds[i] == block.chainid) {
-                _liquidationCall(msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken, sendToChainId);
+                _liquidationCall(
+                    msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken, sendToChainId
+                );
             } else {
                 ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
-                    _reserves[debtAsset].superchainAssetAddress,
-                    address(this),
-                    debtToCover[i],
-                    chainIds[i]
+                    _reserves[debtAsset].superchainAssetAddress, address(this), debtToCover[i], chainIds[i]
                 );
-                emit CrossChainLiquidationCall(chainIds[i], msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken, sendToChainId);
+                emit CrossChainLiquidationCall(
+                    chainIds[i],
+                    msg.sender,
+                    collateralAsset,
+                    debtAsset,
+                    user,
+                    debtToCover[i],
+                    receiveAToken,
+                    sendToChainId
+                );
             }
         }
     }
 
-    event CrossChainLiquidationCall(uint256 chainId, address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken, uint256 sendToChainId);
+    event CrossChainLiquidationCall(
+        uint256 chainId,
+        address sender,
+        address collateralAsset,
+        address debtAsset,
+        address user,
+        uint256 debtToCover,
+        bool receiveAToken,
+        uint256 sendToChainId
+    );
 
     function _liquidationCall(
         address sender,
@@ -757,11 +805,49 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         address debtToken;
     }
 
+    event InitiateFlashLoanCrossChain(
+        uint256 chainId,
+        address sender,
+        address receiverAddress,
+        address[] assets,
+        uint256[] amounts,
+        uint256[] modes,
+        address onBehalfOf,
+        bytes params,
+        uint16 referralCode
+    );
+
+    function initiateFlashLoan(
+        uint256[] calldata chainIds,
+        address receiverAddress,
+        address[][] calldata assets,
+        uint256[][] calldata amounts,
+        uint256[][] calldata modes,
+        address onBehalfOf,
+        bytes[] calldata params,
+        uint16[] calldata referralCode
+    ) external whenNotPaused {
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            emit InitiateFlashLoanCrossChain(
+                chainIds[i],
+                msg.sender,
+                receiverAddress,
+                assets[i],
+                amounts[i],
+                modes[i],
+                onBehalfOf,
+                params[i],
+                referralCode[i]
+            );
+        }
+    }
+
     /**
      * @dev Allows smartcontracts to access the liquidity of the pool within one transaction,
      * as long as the amount taken plus a fee is returned.
      * IMPORTANT There are security concerns for developers of flashloan receiver contracts that must be kept into consideration.
      * For further details please visit https://developers.aave.com
+     * @param sender The address of the sender
      * @param receiverAddress The address of the contract receiving the funds, implementing the IFlashLoanReceiver interface
      * @param assets The addresses of the assets being flash-borrowed
      * @param amounts The amounts amounts being flash-borrowed
@@ -769,86 +855,94 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      *   0 -> Don't open any debt, just revert if funds can't be transferred from the receiver
      *   1 -> Open debt at stable rate for the value of the amount flash-borrowed to the `onBehalfOf` address
      *   2 -> Open debt at variable rate for the value of the amount flash-borrowed to the `onBehalfOf` address
-     * @param chainIds the chain ids from which to borrow the assets
      * @param onBehalfOf The address  that will receive the debt in the case of using on `modes` 1 or 2
      * @param params Variadic packed params to pass to the receiver as extra information
      * @param referralCode Code used to register the integrator originating the operation, for potential rewards.
      *   0 if the action is executed directly by the user, without any middle-man
      *
      */
-    function flashLoan(
+    function _flashLoan(
+        address sender,
         address receiverAddress,
-        address[] calldata assets,
-        uint256[] calldata amounts,
-        uint256[] calldata modes,
-        uint256[] calldata chainIds,
+        address[] memory assets,
+        uint256[] memory amounts,
+        uint256[] memory modes,
         address onBehalfOf,
-        bytes calldata params,
+        bytes memory params,
         uint16 referralCode
-    ) external override whenNotPaused {
-        // FlashLoanLocalVars memory vars;
+    ) internal {
+        FlashLoanLocalVars memory vars;
 
-        // ValidationLogic.validateFlashloan(assets, amounts);
+        ValidationLogic.validateFlashloan(assets, amounts);
 
-        // address[] memory aTokenAddresses = new address[](assets.length);
-        // uint256[] memory premiums = new uint256[](assets.length);
+        address[] memory aTokenAddresses = new address[](assets.length);
+        uint256[] memory premiums = new uint256[](assets.length);
 
-        // vars.receiver = IFlashLoanReceiver(receiverAddress);
+        vars.receiver = IFlashLoanReceiver(receiverAddress);
 
-        // for (vars.i = 0; vars.i < assets.length; vars.i++) {
-        //     aTokenAddresses[vars.i] = _reserves[assets[vars.i]].aTokenAddress;
+        for (vars.i = 0; vars.i < assets.length; vars.i++) {
+            aTokenAddresses[vars.i] = _reserves[assets[vars.i]].aTokenAddress;
 
-        //     premiums[vars.i] = amounts[vars.i] * _flashLoanPremiumTotal / 10000;
+            premiums[vars.i] = amounts[vars.i] * _flashLoanPremiumTotal / 10000;
 
-        //     // TODO transfer assets from all the listed chains
-        //     // maybe something like the underlying assets are wrapped to SuperChainERC20 tokens
-        //     IAToken(aTokenAddresses[vars.i]).transferUnderlyingTo(receiverAddress, amounts[vars.i]);
-        // }
+            IAToken(aTokenAddresses[vars.i]).transferUnderlyingTo(receiverAddress, amounts[vars.i], block.chainid);
+        }
 
-        // require(
-        //     vars.receiver.executeOperation(assets, amounts, premiums, msg.sender, params),
-        //     Errors.LP_INVALID_FLASH_LOAN_EXECUTOR_RETURN
-        // );
+        require(
+            vars.receiver.executeOperation(assets, amounts, premiums, sender, params),
+            Errors.LP_INVALID_FLASH_LOAN_EXECUTOR_RETURN
+        );
 
-        // for (vars.i = 0; vars.i < assets.length; vars.i++) {
-        //     vars.currentAsset = assets[vars.i];
-        //     vars.currentAmount = amounts[vars.i];
-        //     vars.currentPremium = premiums[vars.i];
-        //     vars.currentATokenAddress = aTokenAddresses[vars.i];
-        //     vars.currentAmountPlusPremium = vars.currentAmount + vars.currentPremium;
+        bool borrowExecuted = false;
+        for (vars.i = 0; vars.i < assets.length; vars.i++) {
+            vars.currentAsset = assets[vars.i];
+            vars.currentAmount = amounts[vars.i];
+            vars.currentPremium = premiums[vars.i];
+            vars.currentATokenAddress = aTokenAddresses[vars.i];
+            vars.currentAmountPlusPremium = vars.currentAmount + vars.currentPremium;
 
-        //     if (DataTypes.InterestRateMode(modes[vars.i]) == DataTypes.InterestRateMode.NONE) {
-        //         _reserves[vars.currentAsset].updateState();
-        //         _reserves[vars.currentAsset].cumulateToLiquidityIndex(
-        //             IERC20(vars.currentATokenAddress).totalSupply(), vars.currentPremium
-        //         );
-        //         _reserves[vars.currentAsset].updateInterestRates(
-        //             vars.currentAsset, vars.currentATokenAddress, vars.currentAmountPlusPremium, 0
-        //         );
+            if (DataTypes.InterestRateMode(modes[vars.i]) == DataTypes.InterestRateMode.NONE) {
+                _reserves[vars.currentAsset].updateState();
+                _reserves[vars.currentAsset].cumulateToLiquidityIndex(
+                    IERC20(vars.currentATokenAddress).totalSupply(), vars.currentPremium
+                );
+                _reserves[vars.currentAsset].updateInterestRates(
+                    vars.currentAsset, vars.currentATokenAddress, vars.currentAmountPlusPremium, 0
+                );
 
-        //         IERC20(vars.currentAsset).safeTransferFrom(
-        //             receiverAddress, vars.currentATokenAddress, vars.currentAmountPlusPremium
-        //         );
-        //     } else {
-        //         // If the user chose to not return the funds, the system checks if there is enough collateral and
-        //         // eventually opens a debt position
-        //         _executeBorrow(
-        //             ExecuteBorrowParams(
-        //                 vars.currentAsset,
-        //                 msg.sender,
-        //                 onBehalfOf,
-        //                 vars.currentAmount,
-        //                 modes[vars.i],
-        //                 vars.currentATokenAddress,
-        //                 referralCode,
-        //                 false
-        //             )
-        //         );
-        //     }
-        //     emit FlashLoan(
-        //         receiverAddress, msg.sender, vars.currentAsset, vars.currentAmount, vars.currentPremium, referralCode
-        //     );
-        // }
+                IERC20(vars.currentAsset).safeTransferFrom(
+                    receiverAddress, address(this), vars.currentAmountPlusPremium
+                );
+                ISuperchainAsset(vars.currentAsset).mint(vars.currentATokenAddress, vars.currentAmountPlusPremium);
+            } else {
+                // If the user chose to not return the funds, the system checks if there is enough collateral and
+                // eventually opens a debt position
+                _executeBorrow(
+                    ExecuteBorrowParams(
+                        vars.currentAsset,
+                        sender,
+                        onBehalfOf,
+                        block.chainid,
+                        vars.currentAmount,
+                        modes[vars.i],
+                        vars.currentATokenAddress,
+                        referralCode,
+                        false
+                    )
+                );
+                borrowExecuted = true;
+            }
+            emit FlashLoan(
+                block.chainid,
+                borrowExecuted,
+                sender,
+                vars.currentAsset,
+                vars.currentAmount,
+                vars.currentPremium,
+                receiverAddress,
+                referralCode
+            );
+        }
     }
 
     /**
