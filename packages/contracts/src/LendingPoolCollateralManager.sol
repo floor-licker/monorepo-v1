@@ -9,6 +9,7 @@ import {IStableDebtToken} from "./interfaces/IStableDebtToken.sol";
 import {IVariableDebtToken} from "./interfaces/IVariableDebtToken.sol";
 import {IPriceOracleGetter} from "./interfaces/IPriceOracleGetter.sol";
 import {ILendingPoolCollateralManager} from "./interfaces/ILendingPoolCollateralManager.sol";
+import {ISuperchainAsset} from "./interfaces/ISuperchainAsset.sol";
 
 import {VersionedInitializable} from "./libraries/aave-upgradeability/VersionedInitializable.sol";
 import {GenericLogic} from "./libraries/logic/GenericLogic.sol";
@@ -82,7 +83,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
      * @param debtToCover The debt amount of borrowed `asset` the liquidator wants to cover
      * @param receiveAToken `true` if the liquidators wants to receive the collateral aTokens, `false` if he wants
      * to receive the underlying collateral asset directly
-     *
+     * @param sendToChainId the chain id to send the collateral to if receiveAToken is `false`
      */
     function liquidationCall(
         address sender,
@@ -90,7 +91,8 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
         address debtAsset,
         address user,
         uint256 debtToCover,
-        bool receiveAToken
+        bool receiveAToken,
+        uint256 sendToChainId
     ) external override returns (uint256, string memory) {
         DataTypes.ReserveData storage collateralReserve = _reserves[collateralAsset];
         DataTypes.ReserveData storage debtReserve = _reserves[debtAsset];
@@ -138,18 +140,6 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
             vars.actualDebtToLiquidate = vars.debtAmountNeeded;
         }
 
-        // If the liquidator reclaims the underlying asset, we make sure there is enough available liquidity in the
-        // collateral reserve
-        if (!receiveAToken) {
-            uint256 currentAvailableCollateral = IERC20(collateralAsset).balanceOf(address(vars.collateralAtoken));
-            if (currentAvailableCollateral < vars.maxCollateralToLiquidate) {
-                return (
-                    uint256(Errors.CollateralManagerErrors.NOT_ENOUGH_LIQUIDITY),
-                    Errors.LPCM_NOT_ENOUGH_LIQUIDITY_TO_LIQUIDATE
-                );
-            }
-        }
-
         ReserveLogic.updateState(debtReserve);
 
         if (vars.userVariableDebt >= vars.actualDebtToLiquidate) {
@@ -187,9 +177,8 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
                 collateralAsset, address(vars.collateralAtoken), 0, vars.maxCollateralToLiquidate
             );
 
-            // TODO check
             vars.collateralAtoken.burn(
-                user, sender, block.chainid, vars.maxCollateralToLiquidate, collateralReserve.liquidityIndex
+                user, sender, sendToChainId, vars.maxCollateralToLiquidate, collateralReserve.liquidityIndex
             );
         }
 
@@ -200,8 +189,10 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
             emit ReserveUsedAsCollateralDisabled(collateralAsset, user);
         }
 
-        // Transfers the debt asset being repaid to the aToken, where the liquidity is kept
-        IERC20(debtAsset).safeTransferFrom(sender, debtReserve.aTokenAddress, vars.actualDebtToLiquidate);
+        ISuperchainAsset(debtReserve.superchainAssetAddress).transfer(debtReserve.aTokenAddress, vars.actualDebtToLiquidate);
+        if (debtToCover > vars.actualDebtToLiquidate) {
+            ISuperchainAsset(debtReserve.superchainAssetAddress).transfer(sender, debtToCover - vars.actualDebtToLiquidate);
+        }
 
         emit LiquidationCall(
             sender,

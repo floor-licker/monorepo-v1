@@ -6,7 +6,6 @@ import {SafeERC20} from "@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.
 import {Address} from "@openzeppelin/contracts-v5/utils/Address.sol";
 
 import {ILendingPoolAddressesProvider} from "./interfaces/ILendingPoolAddressesProvider.sol";
-// TODO: make AToken, StableDebtToken, VariableDebtToken as SuperchainERC20's
 import {IAToken} from "./interfaces/IAToken.sol";
 import {IVariableDebtToken} from "./interfaces/IVariableDebtToken.sol";
 import {IFlashLoanReceiver} from "./interfaces/IFlashLoanReceiver.sol";
@@ -205,9 +204,9 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             }
         }
         if (selector == CrossChainLiquidationCall.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
-            (address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken) =
-                abi.decode(_data[64:], (address, address, address, address, uint256, bool));
-            _liquidationCall(sender, collateralAsset, debtAsset, user, debtToCover, receiveAToken);
+            (address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken, uint256 sendToChainId) =
+                abi.decode(_data[64:], (address, address, address, address, uint256, bool, uint256));
+            _liquidationCall(sender, collateralAsset, debtAsset, user, debtToCover, receiveAToken, sendToChainId);
         }
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
@@ -463,12 +462,12 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         address onBehalfOf,
         uint256[] calldata chainIds
     ) external override whenNotPaused {
+        IERC20(asset).safeTransferFrom(msg.sender, address(this), totalAmount);
         ISuperchainAsset(_reserves[asset].superchainAssetAddress).mint(address(this), totalAmount);
         for (uint256 i = 1; i < chainIds.length; i++) {
             if (chainIds[i] == block.chainid) {
                 _repay(msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             } else {
-                // TODO: THINK more about this: here extra amount sent will be kept as superchainAsset on the destination chain
                 ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
                     _reserves[asset].superchainAssetAddress,
                     address(this),
@@ -583,7 +582,11 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         whenNotPaused
     {
         for (uint256 i = 0; i < chainIds.length; i++) {
-            emit RebalanceStableBorrowRateCrossChain(chainIds[i], asset, user);
+            if (chainIds[i] == block.chainid) {
+                _rebalanceStableBorrowRate(asset, user);
+            } else {
+                emit RebalanceStableBorrowRateCrossChain(chainIds[i], asset, user);
+            }
         }
     }
 
@@ -672,8 +675,10 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      * @param debtAsset The address of the underlying borrowed asset to be repaid with the liquidation
      * @param user The address of the borrower getting liquidated
      * @param debtToCover The debt amount of borrowed `asset` the liquidator wants to cover, from each chain
+     * @param totalDebtToCover The total debt amount of borrowed `asset` the liquidator wants to cover
      * @param chainIds Array of chain IDs where the liquidation should be executed
      * @param receiveAToken `true` if the liquidators wants to receive the collateral aTokens, `false` if he wants
+     * @param sendToChainId the chain id to send the collateral to if receiveAToken is `false`
      * to receive the underlying collateral asset directly
      *
      */
@@ -682,19 +687,29 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         address debtAsset,
         address user,
         uint256[] calldata debtToCover,
+        uint256 totalDebtToCover,
         uint256[] calldata chainIds,
-        bool receiveAToken
+        bool receiveAToken,
+        uint256 sendToChainId
     ) external override whenNotPaused {
+        IERC20(debtAsset).safeTransferFrom(msg.sender, address(this), totalDebtToCover);
+        ISuperchainAsset(_reserves[debtAsset].superchainAssetAddress).mint(address(this), totalDebtToCover);
         for (uint256 i = 0; i < chainIds.length; i++) {
             if (chainIds[i] == block.chainid) {
-                _liquidationCall(msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken);
+                _liquidationCall(msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken, sendToChainId);
             } else {
-                emit CrossChainLiquidationCall(chainIds[i], msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken);
+                ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
+                    _reserves[debtAsset].superchainAssetAddress,
+                    address(this),
+                    debtToCover[i],
+                    chainIds[i]
+                );
+                emit CrossChainLiquidationCall(chainIds[i], msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken, sendToChainId);
             }
         }
     }
 
-    event CrossChainLiquidationCall(uint256 chainId, address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken);
+    event CrossChainLiquidationCall(uint256 chainId, address sender, address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken, uint256 sendToChainId);
 
     function _liquidationCall(
         address sender,
@@ -702,20 +717,24 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         address debtAsset,
         address user,
         uint256 debtToCover,
-        bool receiveAToken
+        bool receiveAToken,
+        uint256 sendToChainId
     ) internal {
         address collateralManager = _addressesProvider.getLendingPoolCollateralManager();
+
+        IERC20(debtAsset).safeTransferFrom(address(this), collateralManager, debtToCover);
 
         //solium-disable-next-line
         (bool success, bytes memory result) = collateralManager.delegatecall(
             abi.encodeWithSignature(
-                "liquidationCall(address,address,address,address,uint256,bool)",
+                "liquidationCall(address,address,address,address,uint256,bool,uint256)",
                 sender,
                 collateralAsset,
                 debtAsset,
                 user,
                 debtToCover,
-                receiveAToken
+                receiveAToken,
+                sendToChainId
             )
         );
 
