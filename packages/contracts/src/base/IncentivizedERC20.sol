@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: agpl-3.0
 pragma solidity 0.8.25;
 
-import "@openzeppelin/contracts/utils/Context.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import "@openzeppelin/contracts-v5/utils/Context.sol";
+import "@openzeppelin/contracts-v5/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts-v5/token/ERC20/extensions/IERC20Metadata.sol";
 
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import "../../interfaces/IAaveIncentivesController.sol";
+import "../interfaces/IAaveIncentivesController.sol";
 
 /**
  * @title ERC20
@@ -14,8 +13,6 @@ import "../../interfaces/IAaveIncentivesController.sol";
  * @author Aave, inspired by the Openzeppelin ERC20 implementation
  **/
 abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
-  using SafeMath for uint256;
-
   mapping(address => uint256) internal _balances;
 
   mapping(address => mapping(address => uint256)) private _allowances;
@@ -28,7 +25,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
     string memory name,
     string memory symbol,
     uint8 decimals
-  ) public {
+  ) {
     _name = name;
     _symbol = symbol;
     _decimals = decimals;
@@ -129,7 +126,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
     _approve(
       sender,
       _msgSender(),
-      _allowances[sender][_msgSender()].sub(amount, 'ERC20: transfer amount exceeds allowance')
+      _allowances[sender][_msgSender()] - amount
     );
     emit Transfer(sender, recipient, amount);
     return true;
@@ -142,7 +139,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
    * @return `true`
    **/
   function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
-    _approve(_msgSender(), spender, _allowances[_msgSender()][spender].add(addedValue));
+    _approve(_msgSender(), spender, _allowances[_msgSender()][spender] + addedValue);
     return true;
   }
 
@@ -160,10 +157,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
     _approve(
       _msgSender(),
       spender,
-      _allowances[_msgSender()][spender].sub(
-        subtractedValue,
-        'ERC20: decreased allowance below zero'
-      )
+      _allowances[_msgSender()][spender] - subtractedValue
     );
     return true;
   }
@@ -179,9 +173,9 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
     _beforeTokenTransfer(sender, recipient, amount);
 
     uint256 oldSenderBalance = _balances[sender];
-    _balances[sender] = oldSenderBalance.sub(amount, 'ERC20: transfer amount exceeds balance');
+    _balances[sender] = oldSenderBalance - amount;
     uint256 oldRecipientBalance = _balances[recipient];
-    _balances[recipient] = _balances[recipient].add(amount);
+    _balances[recipient] = oldRecipientBalance + amount;
 
     if (address(_getIncentivesController()) != address(0)) {
       uint256 currentTotalSupply = _totalSupply;
@@ -198,10 +192,10 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
     _beforeTokenTransfer(address(0), account, amount);
 
     uint256 oldTotalSupply = _totalSupply;
-    _totalSupply = oldTotalSupply.add(amount);
+    _totalSupply = oldTotalSupply + amount;
 
     uint256 oldAccountBalance = _balances[account];
-    _balances[account] = oldAccountBalance.add(amount);
+    _balances[account] = oldAccountBalance + amount;
 
     if (address(_getIncentivesController()) != address(0)) {
       _getIncentivesController().handleAction(account, oldTotalSupply, oldAccountBalance);
@@ -214,10 +208,10 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
     _beforeTokenTransfer(account, address(0), amount);
 
     uint256 oldTotalSupply = _totalSupply;
-    _totalSupply = oldTotalSupply.sub(amount);
+    _totalSupply = oldTotalSupply - amount;
 
     uint256 oldAccountBalance = _balances[account];
-    _balances[account] = oldAccountBalance.sub(amount, 'ERC20: burn amount exceeds balance');
+    _balances[account] = oldAccountBalance - amount;
 
     if (address(_getIncentivesController()) != address(0)) {
       _getIncentivesController().handleAction(account, oldTotalSupply, oldAccountBalance);

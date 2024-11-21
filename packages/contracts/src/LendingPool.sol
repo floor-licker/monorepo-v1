@@ -13,6 +13,8 @@ import {IFlashLoanReceiver} from "./interfaces/IFlashLoanReceiver.sol";
 import {IPriceOracleGetter} from "./interfaces/IPriceOracleGetter.sol";
 import {IStableDebtToken} from "./interfaces/IStableDebtToken.sol";
 import {ILendingPool} from "./interfaces/ILendingPool.sol";
+import {ISuperchainAsset} from "./interfaces/ISuperchainAsset.sol";
+import {ISuperchainTokenBridge} from '@contracts-bedrock/L2/interfaces/ISuperchainTokenBridge.sol';
 import {ISemver} from "@contracts-bedrock/universal/interfaces/ISemver.sol";
 import {ICrossL2Inbox} from "@contracts-bedrock/L2/interfaces/ICrossL2Inbox.sol";
 
@@ -456,19 +458,20 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
     function repay(
         address asset,
         uint256[] calldata amounts,
+        uint256 totalAmount,
         uint256[] calldata rateMode,
         address onBehalfOf,
         uint256[] calldata chainIds
     ) external override whenNotPaused {
+        ISuperchainAsset(_reserves[asset].superchainAssetAddress).mint(address(this), totalAmount);
         for (uint256 i = 1; i < chainIds.length; i++) {
-            ISuperchainAsset(_reserves[asset].superchainAssetAddress).mint(msg.sender, amounts[i]);
             if (chainIds[i] == block.chainid) {
                 _repay(msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             } else {
                 // TODO: THINK more about this: here extra amount sent will be kept as superchainAsset on the destination chain
                 ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
                     _reserves[asset].superchainAssetAddress,
-                    msg.sender,
+                    address(this),
                     amounts[i],
                     chainIds[i]
                 );
@@ -510,7 +513,11 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             _usersConfig[onBehalfOf].setBorrowing(reserve.id, false);
         }
 
-        IERC20(superchainAsset).safeTransferFrom(sender, aToken, paybackAmount);
+        IERC20(superchainAsset).safeTransfer(aToken, paybackAmount);
+
+        if (amount - paybackAmount > 0) {
+            IERC20(superchainAsset).safeTransfer(sender, amount - paybackAmount);
+        }
 
         IAToken(aToken).handleRepayment(sender, paybackAmount);
 

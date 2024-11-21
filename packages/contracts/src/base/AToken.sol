@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: agpl-3.0
 pragma solidity 0.8.25;
 
-import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
-import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
+import {IERC20} from '@openzeppelin/contracts-v5/token/ERC20/IERC20.sol';
+import {SafeERC20} from '@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.sol';
 import {WadRayMath} from '../libraries/math/WadRayMath.sol';
 import {Errors} from '../libraries/helpers/Errors.sol';
 import {VersionedInitializable} from '../libraries/aave-upgradeability/VersionedInitializable.sol';
 
-import {ILendingPool} from '../../interfaces/ILendingPool.sol';
-import {IAToken} from '../../interfaces/IAToken.sol';
+import {ILendingPool} from '../interfaces/ILendingPool.sol';
+import {IAToken} from '../interfaces/IAToken.sol';
 import {IncentivizedERC20} from './IncentivizedERC20.sol';
-import {IAaveIncentivesController} from '../../interfaces/IAaveIncentivesController.sol';
+import {IAaveIncentivesController} from '../interfaces/IAaveIncentivesController.sol';
 
 import {Predeploys} from "@contracts-bedrock/libraries/Predeploys.sol";
-import {ICrosschainERC20} from '@contracts-bedrock/L2/interfaces/ICrosschainERC20.sol';
+import {ISuperchainAsset} from '../interfaces/ISuperchainAsset.sol';
 import {ISuperchainTokenBridge} from '@contracts-bedrock/L2/interfaces/ISuperchainTokenBridge.sol';
-import {ISemver} from "@contracts-bedrock/universal/interfaces/ISemver.sol";
 
 /**
  * @title Aave ERC20 AToken
@@ -25,9 +24,7 @@ import {ISemver} from "@contracts-bedrock/universal/interfaces/ISemver.sol";
 contract AToken is
   VersionedInitializable,
   IncentivizedERC20('ATOKEN_IMPL', 'ATOKEN_IMPL', 0),
-  IAToken,
-  ICrosschainERC20,
-  ISemver
+  IAToken
 {
   using WadRayMath for uint256;
   using SafeERC20 for IERC20;
@@ -382,7 +379,7 @@ contract AToken is
         )
       );
     require(owner == ecrecover(digest, v, r, s), 'INVALID_SIGNATURE');
-    _nonces[owner] = currentValidNonce.add(1);
+    _nonces[owner] = currentValidNonce + 1;
     _approve(owner, spender, value);
   }
 

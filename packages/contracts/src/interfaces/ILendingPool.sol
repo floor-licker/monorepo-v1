@@ -183,6 +183,7 @@ interface ILendingPool {
     function repay(
         address asset,
         uint256[] calldata amounts,
+        uint256 totalAmount,
         uint256[] calldata rateMode,
         address onBehalfOf,
         uint256[] calldata chainIds
