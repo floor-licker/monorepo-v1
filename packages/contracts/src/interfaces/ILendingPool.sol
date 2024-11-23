@@ -12,10 +12,16 @@ interface ILendingPool {
      * @param amount The amount deposited
      * @param onBehalfOf The beneficiary of the deposit, receiving the aTokens
      * @param referral The referral code used
+     * @param amountScaled The amount scaled to the pool's unit
      *
      */
     event Deposit(
-        address user, address indexed reserve, uint256 amount, address indexed onBehalfOf, uint16 indexed referral
+        address user,
+        address indexed reserve,
+        uint256 amount,
+        address indexed onBehalfOf,
+        uint16 indexed referral,
+        uint256 amountScaled
     );
 
     /**
@@ -38,6 +44,8 @@ interface ILendingPool {
      * @param sendToChainId The chain id to send the funds to
      * @param borrowRateMode The rate mode: 1 for Stable, 2 for Variable
      * @param borrowRate The numeric rate at which the user has borrowed
+     * @param mintMode 0 if minting aTokens, 1 if minting stable debt, 2 if minting variable debt
+     * @param amountScaled The amount scaled to the pool's unit
      * @param referral The referral code used
      *
      */
@@ -49,6 +57,8 @@ interface ILendingPool {
         uint256 borrowRateMode,
         uint256 sendToChainId,
         uint256 borrowRate,
+        uint256 mintMode,
+        uint256 amountScaled,
         uint16 indexed referral
     );
 

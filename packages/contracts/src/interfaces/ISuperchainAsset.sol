@@ -38,4 +38,9 @@ interface ISuperchainAsset {
     /// @param amount The amount of tokens to transfer
     /// @return A boolean indicating whether the operation was successful
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+
+    /// @notice Get the underlying asset balance of a user
+    /// @param user The address to get the balance of
+    /// @return The underlying asset balance of the user
+    function balances(address user) external view returns (uint256);
 }

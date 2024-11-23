@@ -18,6 +18,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
 
     mapping(address => mapping(address => uint256)) private _allowances;
     uint256 internal _totalSupply;
+    uint256 internal _totalCrossChainSupply;
     string private _name;
     string private _symbol;
     uint8 private _decimals;
@@ -57,7 +58,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
      *
      */
     function totalSupply() public view virtual override returns (uint256) {
-        return _totalSupply;
+        return _totalCrossChainSupply;
     }
 
     /**
@@ -176,6 +177,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
 
         uint256 oldTotalSupply = _totalSupply;
         _totalSupply = oldTotalSupply + amount;
+        _totalCrossChainSupply += amount;
 
         uint256 oldAccountBalance = _balances[account];
         _balances[account] = oldAccountBalance + amount;
@@ -192,6 +194,7 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
 
         uint256 oldTotalSupply = _totalSupply;
         _totalSupply = oldTotalSupply - amount;
+        _totalCrossChainSupply -= amount;
 
         uint256 oldAccountBalance = _balances[account];
         _balances[account] = oldAccountBalance - amount;

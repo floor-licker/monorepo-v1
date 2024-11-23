@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: agpl-3.0
 pragma solidity 0.8.25;
 
+// TODO handle cross chain supply everywhere where minting and burning happens.
+
 import {IERC20} from "@openzeppelin/contracts-v5/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.sol";
 import {Address} from "@openzeppelin/contracts-v5/utils/Address.sol";
@@ -15,7 +17,7 @@ import {ILendingPool} from "./interfaces/ILendingPool.sol";
 import {ISuperchainAsset} from "./interfaces/ISuperchainAsset.sol";
 import {ISuperchainTokenBridge} from "@contracts-bedrock/L2/interfaces/ISuperchainTokenBridge.sol";
 import {ISemver} from "@contracts-bedrock/universal/interfaces/ISemver.sol";
-import {ICrossL2Inbox} from "@contracts-bedrock/L2/interfaces/ICrossL2Inbox.sol";
+import "@contracts-bedrock/L2/interfaces/ICrossL2Inbox.sol";
 
 import {VersionedInitializable} from "./libraries/aave-upgradeability/VersionedInitializable.sol";
 import {Helpers} from "./libraries/helpers/Helpers.sol";
@@ -115,7 +117,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         _maxNumberOfReserves = 128;
     }
 
-    function dispatch(ICrossL2Inbox.Identifier calldata _identifier, bytes calldata _data) external whenNotPaused {
+    function dispatch(Identifier calldata _identifier, bytes calldata _data) external whenNotPaused {
         if (_identifier.origin != address(this)) revert OriginNotSuperLend();
         ICrossL2Inbox(Predeploys.CROSS_L2_INBOX).validateMessage(_identifier, keccak256(_data));
 
@@ -128,6 +130,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         if (selector == Deposit.selector && _identifier.chainId != block.chainid) {
             (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
+            // IAToken(reserve.aTokenAddress).updateCrossChainBalance(amountScaled);
             _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
         }
         if (selector == CrossChainDeposit.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
@@ -156,8 +159,14 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == Borrow.selector && _identifier.chainId != block.chainid) {
-            (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
+            (address asset, uint256 amount,,, uint256 interestRateMode,, uint256 interestRate,, uint256 amountScaled,) =
+                abi.decode(_data[32:], (address, uint256, address, address, uint256, uint256, uint256, uint256, uint256, uint16));
             DataTypes.ReserveData storage reserve = _reserves[asset];
+            if (interestRateMode == 1) {
+                // IStableDebtToken(reserve.stableDebtTokenAddress).updateCrossChainBalance(amountScaled);
+            } else if (interestRateMode == 2) {
+                // IVariableDebtToken(reserve.variableDebtTokenAddress).updateCrossChainBalance(amountScaled);
+            }
             _updateStates(reserve, asset, 0, amount, bytes2(uint16(3)));
         }
         if (selector == CrossChainBorrow.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
@@ -318,14 +327,15 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
         ISuperchainAsset(superchainAsset).mint(aToken, amount);
 
-        bool isFirstDeposit = IAToken(aToken).mint(onBehalfOf, amount, reserve.liquidityIndex);
+        (bool isFirstDeposit, uint256 mintMode, uint256 amountScaled) =
+            IAToken(aToken).mint(onBehalfOf, amount, reserve.liquidityIndex);
 
         if (isFirstDeposit) {
             _usersConfig[onBehalfOf].setUsingAsCollateral(reserve.id, true);
             emit ReserveUsedAsCollateralEnabled(asset, onBehalfOf);
         }
 
-        emit Deposit(sender, asset, amount, onBehalfOf, referralCode);
+        emit Deposit(sender, asset, amount, onBehalfOf, referralCode, amountScaled);
     }
 
     // Update the DepositInitiated event to include chain IDs
@@ -903,6 +913,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
 
             if (DataTypes.InterestRateMode(modes[vars.i]) == DataTypes.InterestRateMode.NONE) {
                 _reserves[vars.currentAsset].updateState();
+                // TODO total liquidity is not correct, if should show the complete liquidity across all chains
                 _reserves[vars.currentAsset].cumulateToLiquidityIndex(
                     IERC20(vars.currentATokenAddress).totalSupply(), vars.currentPremium
                 );
@@ -1189,7 +1200,7 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
      *         - Chain ID in message doesn't match current chain
      *         - Selector doesn't match ReserveConfigurationChanged
      */
-    function setConfiguration(ICrossL2Inbox.Identifier calldata _identifier, bytes calldata _data) external {
+    function setConfiguration(Identifier calldata _identifier, bytes calldata _data) external {
         if (_identifier.origin != _addressesProvider.getLendingPoolConfigurator()) {
             revert OriginNotLendingPoolConfigurator();
         }
@@ -1257,16 +1268,18 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
         _updateStates(reserve, address(0), 0, 0, bytes2(uint16(1)));
 
         uint256 currentStableRate = 0;
+        uint256 mintMode = 0;
+        uint256 amountScaled = 0;
 
         bool isFirstBorrowing = false;
         if (DataTypes.InterestRateMode(vars.interestRateMode) == DataTypes.InterestRateMode.STABLE) {
             currentStableRate = reserve.currentStableBorrowRate;
 
-            isFirstBorrowing = IStableDebtToken(reserve.stableDebtTokenAddress).mint(
+            (isFirstBorrowing, mintMode, amountScaled) = IStableDebtToken(reserve.stableDebtTokenAddress).mint(
                 vars.user, vars.onBehalfOf, vars.amount, currentStableRate
             );
         } else {
-            isFirstBorrowing = IVariableDebtToken(reserve.variableDebtTokenAddress).mint(
+            (isFirstBorrowing, mintMode, amountScaled) = IVariableDebtToken(reserve.variableDebtTokenAddress).mint(
                 vars.user, vars.onBehalfOf, vars.amount, reserve.variableBorrowIndex
             );
         }
@@ -1291,6 +1304,8 @@ contract LendingPool is VersionedInitializable, ILendingPool, LendingPoolStorage
             DataTypes.InterestRateMode(vars.interestRateMode) == DataTypes.InterestRateMode.STABLE
                 ? currentStableRate
                 : reserve.currentVariableBorrowRate,
+            mintMode,
+            amountScaled,
             vars.referralCode
         );
     }

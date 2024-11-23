@@ -2,6 +2,8 @@
 pragma solidity 0.8.25;
 
 import {IScaledBalanceToken} from "./IScaledBalanceToken.sol";
+import {IInitializableDebtToken} from "./IInitializableDebtToken.sol";
+import {IAaveIncentivesController} from "./IAaveIncentivesController.sol";
 
 /**
  * @title IVariableDebtToken
@@ -9,7 +11,7 @@ import {IScaledBalanceToken} from "./IScaledBalanceToken.sol";
  * @notice Defines the basic interface for a variable debt token.
  *
  */
-interface IVariableDebtToken is IScaledBalanceToken {
+interface IVariableDebtToken is IScaledBalanceToken, IInitializableDebtToken {
     /**
      * @dev Emitted after the mint action
      * @param from The address performing the mint
@@ -28,9 +30,13 @@ interface IVariableDebtToken is IScaledBalanceToken {
      * @param amount The amount of debt being minted
      * @param index The variable debt index of the reserve
      * @return `true` if the the previous balance of the user is 0
+     * @return returns 1.
+     * @return amountScaled The amount scaled
      *
      */
-    function mint(address user, address onBehalfOf, uint256 amount, uint256 index) external returns (bool);
+    function mint(address user, address onBehalfOf, uint256 amount, uint256 index)
+        external
+        returns (bool, uint256, uint256);
 
     /**
      * @dev Emitted when variable debt is burnt
@@ -45,7 +51,21 @@ interface IVariableDebtToken is IScaledBalanceToken {
      * @dev Burns user variable debt
      * @param user The user which debt is burnt
      * @param index The variable debt index of the reserve
+     * @return returns 2.
+     * @return amountScaled The amount scaled
      *
      */
-    function burn(address user, uint256 amount, uint256 index) external;
+    function burn(address user, uint256 amount, uint256 index) external returns (uint256, uint256);
+
+    /**
+     * @dev Updates the cross chain balance
+     * @param amountScaled The amount scaled
+     * @param mode 1 if minting, 2 if burning
+     */
+    function updateCrossChainBalance(uint256 amountScaled, uint256 mode) external;
+
+    /**
+     * @dev Returns the address of the incentives controller contract
+     */
+    function getIncentivesController() external view returns (IAaveIncentivesController);
 }

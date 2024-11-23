@@ -105,6 +105,19 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
     }
 
     /**
+     * @dev Updates the cross chain balance
+     * @param amountScaled The amount scaled
+     * @param mode The mode
+     */
+    function updateCrossChainBalance(uint256 amountScaled, uint256 mode) external override onlyLendingPool {
+        if (mode == 1) {
+            _totalCrossChainSupply += amountScaled;
+        } else if (mode == 2) {
+            _totalCrossChainSupply -= amountScaled;
+        }
+    }
+
+    /**
      * @dev Burns aTokens from `user` and sends the equivalent amount of underlying to `receiverOfUnderlying`
      * - Only callable by the LendingPool, as extra state updates there need to be managed
      * @param user The owner of the aTokens, getting them burned
@@ -117,6 +130,7 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
         external
         override
         onlyLendingPool
+        returns (uint256, uint256)
     {
         uint256 amountScaled = amount.rayDiv(index);
         require(amountScaled != 0, Errors.CT_INVALID_BURN_AMOUNT);
@@ -132,6 +146,7 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
 
         emit Transfer(user, address(0), amount);
         emit Burn(user, receiverOfUnderlying, amount, index);
+        return (2, amountScaled);
     }
 
     /**
@@ -142,8 +157,13 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
      * @param index The new liquidity index of the reserve
      * @return `true` if the the previous balance of the user was 0
      */
-    function mint(address user, uint256 amount, uint256 index) external override onlyLendingPool returns (bool) {
-        uint256 previousBalance = super.balanceOf(user);
+    function mint(address user, uint256 amount, uint256 index)
+        external
+        override
+        onlyLendingPool
+        returns (bool, uint256, uint256)
+    {
+        uint256 previousBalance = super.balanceOf(user); // TODO this should return the complete balance across all chains
 
         uint256 amountScaled = amount.rayDiv(index);
         require(amountScaled != 0, Errors.CT_INVALID_MINT_AMOUNT);
@@ -152,7 +172,7 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
         emit Transfer(address(0), user, amount);
         emit Mint(user, amount, index);
 
-        return previousBalance == 0;
+        return (previousBalance == 0, 1, amountScaled);
     }
 
     /**
@@ -161,9 +181,14 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
      * @param amount The amount of tokens getting minted
      * @param index The new liquidity index of the reserve
      */
-    function mintToTreasury(uint256 amount, uint256 index) external override onlyLendingPool {
+    function mintToTreasury(uint256 amount, uint256 index)
+        external
+        override
+        onlyLendingPool
+        returns (uint256, uint256)
+    {
         if (amount == 0) {
-            return;
+            return (0, 0);
         }
 
         address treasury = _treasury;
@@ -176,6 +201,8 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
 
         emit Transfer(address(0), treasury, amount);
         emit Mint(treasury, amount, index);
+
+        return (1, amount.rayDiv(index));
     }
 
     /**
@@ -311,7 +338,13 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
                 _underlyingAsset, target, amount, toChainId
             );
         } else {
-            ISuperchainAsset(_underlyingAsset).burn(target, amount);
+            uint256 underlyingAmount = ISuperchainAsset(_underlyingAsset).balances(address(this));
+            if (underlyingAmount >= amount) {
+                ISuperchainAsset(_underlyingAsset).burn(target, amount);
+            } else {
+                ISuperchainAsset(_underlyingAsset).burn(target, underlyingAmount);
+                ISuperchainAsset(_underlyingAsset).transfer(target, amount - underlyingAmount);
+            }
         }
         return amount;
     }
