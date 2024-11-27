@@ -118,7 +118,6 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
         if (selector == Deposit.selector && _identifier.chainId != block.chainid) {
             (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
-            // IAToken(reserve.aTokenAddress).updateCrossChainBalance(amountScaled);
             _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
         }
         if (selector == CrossChainDeposit.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
@@ -134,6 +133,7 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
         if (selector == Withdraw.selector && _identifier.chainId != block.chainid) {
             (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
+            // IAToken(reserve.aTokenAddress).updateCrossChainBalance(amountScaled);
             _updateStates(reserve, asset, 0, amount, bytes2(uint16(3)));
         }
         if (selector == CrossChainWithdraw.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {

@@ -3,7 +3,7 @@ pragma solidity 0.8.25;
 
 import {ILendingPool} from "../../interfaces/ILendingPool.sol";
 import {ICreditDelegationToken} from "../../interfaces/ICreditDelegationToken.sol";
-import {VersionedInitializable} from "../../libraries/aave-upgradeability/VersionedInitializable.sol";
+import {Initializable} from "@solady/utils/Initializable.sol";
 import {IncentivizedERC20} from "../IncentivizedERC20.sol";
 import {Errors} from "../../libraries/helpers/Errors.sol";
 
@@ -14,7 +14,7 @@ import {Errors} from "../../libraries/helpers/Errors.sol";
  */
 abstract contract DebtTokenBase is
     IncentivizedERC20("DEBTTOKEN_IMPL", "DEBTTOKEN_IMPL", 0),
-    VersionedInitializable,
+    Initializable,
     ICreditDelegationToken
 {
     mapping(address => mapping(address => uint256)) internal _borrowAllowances;

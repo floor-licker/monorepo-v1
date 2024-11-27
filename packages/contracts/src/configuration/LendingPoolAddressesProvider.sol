@@ -202,7 +202,6 @@ contract LendingPoolAddressesProvider is SuperOwnable {
      * @param newAddress The address of the new implementation
      *
      */
-    // TODO: initialization param will be diff acc to diff
     function _updateImpl(bytes32 id, address newAddress, bytes memory params) internal {
         address payable proxyAddress = payable(_addresses[id]);
 

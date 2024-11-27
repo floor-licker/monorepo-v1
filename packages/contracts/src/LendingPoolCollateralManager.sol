@@ -11,7 +11,7 @@ import {IPriceOracleGetter} from "./interfaces/IPriceOracleGetter.sol";
 import {ILendingPoolCollateralManager} from "./interfaces/ILendingPoolCollateralManager.sol";
 import {ISuperchainAsset} from "./interfaces/ISuperchainAsset.sol";
 
-import {VersionedInitializable} from "./libraries/aave-upgradeability/VersionedInitializable.sol";
+import {Initializable} from "@solady/utils/Initializable.sol";
 import {GenericLogic} from "./libraries/logic/GenericLogic.sol";
 import {Helpers} from "./libraries/helpers/Helpers.sol";
 import {WadRayMath} from "./libraries/math/WadRayMath.sol";
@@ -32,7 +32,7 @@ import {LendingPoolStorage} from "./LendingPoolStorage.sol";
  * is the same as the LendingPool, to have compatible storage layouts
  *
  */
-contract LendingPoolCollateralManager is ILendingPoolCollateralManager, VersionedInitializable, LendingPoolStorage {
+contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Initializable, LendingPoolStorage {
     using SafeERC20 for IERC20;
     using WadRayMath for uint256;
     using PercentageMath for uint256;
@@ -68,7 +68,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Versione
      * of the LendingPool contract, the getRevision() function is needed, but the value is not
      * important, as the initialize() function will never be called here
      */
-    function getRevision() internal pure override returns (uint256) {
+    function getRevision() internal pure returns (uint256) {
         return 0;
     }
 

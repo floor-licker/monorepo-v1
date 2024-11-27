@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts-v5/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.sol";
 import {WadRayMath} from "../libraries/math/WadRayMath.sol";
 import {Errors} from "../libraries/helpers/Errors.sol";
-import {VersionedInitializable} from "../libraries/aave-upgradeability/VersionedInitializable.sol";
+import {Initializable} from "@solady/utils/Initializable.sol";
 
 import {ILendingPool} from "../interfaces/ILendingPool.sol";
 import {IAToken} from "../interfaces/IAToken.sol";
@@ -21,7 +21,7 @@ import {ISuperchainTokenBridge} from "@contracts-bedrock/L2/interfaces/ISupercha
  * @dev Implementation of the interest bearing token for the Aave protocol
  * @author Aave
  */
-contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL", 0), IAToken {
+contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL", 0), IAToken {
     using WadRayMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -48,7 +48,7 @@ contract AToken is VersionedInitializable, IncentivizedERC20("ATOKEN_IMPL", "ATO
         _;
     }
 
-    function getRevision() internal pure virtual override returns (uint256) {
+    function getRevision() internal pure virtual returns (uint256) {
         return ATOKEN_REVISION;
     }
 
