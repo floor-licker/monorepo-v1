@@ -174,8 +174,9 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
 
         vars.amountInRay = amount.wadToRay();
 
-        vars.newStableRate = (_usersStableRate[onBehalfOf].rayMul(currentBalance.wadToRay()) +
-            vars.amountInRay.rayMul(rate)) / (currentBalance + amount).wadToRay();
+        vars.newStableRate = (
+            _usersStableRate[onBehalfOf].rayMul(currentBalance.wadToRay()) + vars.amountInRay.rayMul(rate)
+        ) / (currentBalance + amount).wadToRay();
 
         require(vars.newStableRate <= type(uint128).max, Errors.SDT_STABLE_DEBT_OVERFLOW);
         _usersStableRate[onBehalfOf] = vars.newStableRate;
@@ -184,8 +185,9 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
         _totalSupplyTimestamp = _timestamps[onBehalfOf] = uint40(block.timestamp);
 
         // Calculates the updated average stable rate
-        vars.currentAvgStableRate = _avgStableRate = (_avgStableRate.rayMul(vars.previousSupply.wadToRay()) +
-            rate.rayMul(vars.amountInRay)) / vars.nextSupply.wadToRay();
+        vars.currentAvgStableRate = _avgStableRate = (
+            _avgStableRate.rayMul(vars.previousSupply.wadToRay()) + rate.rayMul(vars.amountInRay)
+        ) / vars.nextSupply.wadToRay();
 
         _mint(onBehalfOf, amount + balanceIncrease, vars.previousSupply);
 
