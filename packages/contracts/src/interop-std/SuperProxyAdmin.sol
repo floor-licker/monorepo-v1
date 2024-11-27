@@ -11,7 +11,6 @@ import {SuperOwnable} from "./SuperOwnable.sol";
  * explanation of why you would want to use this see the documentation for {TransparentUpgradeableProxy}.
  */
 contract ProxyAdmin is SuperOwnable {
-
     constructor(address _owner, uint64 _superAdminChainId) {
         _initializeSuperOwner(_superAdminChainId, _owner);
     }
@@ -76,11 +75,12 @@ contract ProxyAdmin is SuperOwnable {
      *
      * - This contract must be the admin of `proxy`.
      */
-    function upgradeAndCall(
-        TransparentUpgradeableProxy proxy,
-        address implementation,
-        bytes memory data
-    ) public payable virtual onlyOwner {
+    function upgradeAndCall(TransparentUpgradeableProxy proxy, address implementation, bytes memory data)
+        public
+        payable
+        virtual
+        onlyOwner
+    {
         proxy.upgradeToAndCall{value: msg.value}(implementation, data);
     }
 }

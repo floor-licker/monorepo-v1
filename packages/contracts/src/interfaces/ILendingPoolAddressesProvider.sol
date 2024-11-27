@@ -1,6 +1,26 @@
 // SPDX-License-Identifier: agpl-3.0
 pragma solidity 0.8.25;
 
+event MarketIdSet(string newMarketId);
+
+event LendingPoolUpdated(address indexed newAddress);
+
+event ConfigurationAdminUpdated(address indexed newAddress);
+
+event EmergencyAdminUpdated(address indexed newAddress);
+
+event LendingPoolConfiguratorUpdated(address indexed newAddress);
+
+event LendingPoolCollateralManagerUpdated(address indexed newAddress);
+
+event PriceOracleUpdated(address indexed newAddress);
+
+event LendingRateOracleUpdated(address indexed newAddress);
+
+event ProxyCreated(bytes32 id, address indexed newAddress);
+
+event AddressSet(bytes32 id, address indexed newAddress, bool hasProxy);
+
 /**
  * @title LendingPoolAddressesProvider contract
  * @dev Main registry of addresses part of or connected to the protocol, including permissioned roles
@@ -10,17 +30,6 @@ pragma solidity 0.8.25;
  *
  */
 interface ILendingPoolAddressesProvider {
-    event MarketIdSet(string newMarketId);
-    event LendingPoolUpdated(address indexed newAddress);
-    event ConfigurationAdminUpdated(address indexed newAddress);
-    event EmergencyAdminUpdated(address indexed newAddress);
-    event LendingPoolConfiguratorUpdated(address indexed newAddress);
-    event LendingPoolCollateralManagerUpdated(address indexed newAddress);
-    event PriceOracleUpdated(address indexed newAddress);
-    event LendingRateOracleUpdated(address indexed newAddress);
-    event ProxyCreated(bytes32 id, address indexed newAddress);
-    event AddressSet(bytes32 id, address indexed newAddress, bool hasProxy);
-
     function getMarketId() external view returns (string memory);
 
     function setMarketId(string calldata marketId) external;

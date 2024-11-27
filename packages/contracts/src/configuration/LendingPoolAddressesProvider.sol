@@ -3,12 +3,10 @@ pragma solidity 0.8.25;
 
 import {SuperOwnable} from "../interop-std/SuperOwnable.sol";
 
-// Prettier ignore to prevent buidler flatter bug
-// prettier-ignore
-import {InitializableImmutableAdminUpgradeabilityProxy} from
-    "../libraries/aave-upgradeability/InitializableImmutableAdminUpgradeabilityProxy.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 
-import {ILendingPoolAddressesProvider} from "../interfaces/ILendingPoolAddressesProvider.sol";
+import "../interfaces/ILendingPoolAddressesProvider.sol";
 
 /**
  * @title LendingPoolAddressesProvider contract
@@ -18,10 +16,10 @@ import {ILendingPoolAddressesProvider} from "../interfaces/ILendingPoolAddresses
  * @author Aave
  *
  */
-contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProvider {
+contract LendingPoolAddressesProvider is SuperOwnable {
     string private _marketId;
     mapping(bytes32 => address) private _addresses;
-
+    address private _proxyAdmin;
     bytes32 private constant LENDING_POOL = "LENDING_POOL";
     bytes32 private constant LENDING_POOL_CONFIGURATOR = "LENDING_POOL_CONFIGURATOR";
     bytes32 private constant POOL_ADMIN = "POOL_ADMIN";
@@ -30,9 +28,10 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
     bytes32 private constant PRICE_ORACLE = "PRICE_ORACLE";
     bytes32 private constant LENDING_RATE_ORACLE = "LENDING_RATE_ORACLE";
 
-    constructor(string memory marketId, address initialOwner) {
+    constructor(string memory marketId, address initialOwner, address proxyAdmin) {
         _initializeSuperOwner(uint64(block.chainid), initialOwner);
         _setMarketId(marketId);
+        _proxyAdmin = proxyAdmin;
     }
 
     /**
@@ -40,15 +39,19 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @return The market id
      *
      */
-    function getMarketId() external view override returns (string memory) {
+    function getMarketId() external view returns (string memory) {
         return _marketId;
+    }
+
+    function getProxyAdmin() external view returns (address) {
+        return _proxyAdmin;
     }
 
     /**
      * @dev Allows to set the market which this LendingPoolAddressesProvider represents
      * @param marketId The market id
      */
-    function setMarketId(string memory marketId) external override onlyOwner {
+    function setMarketId(string memory marketId) external onlyOwner {
         _setMarketId(marketId);
     }
 
@@ -61,8 +64,8 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @param id The id
      * @param implementationAddress The address of the new implementation
      */
-    function setAddressAsProxy(bytes32 id, address implementationAddress) external override onlyOwner {
-        _updateImpl(id, implementationAddress);
+    function setAddressAsProxy(bytes32 id, address implementationAddress, bytes memory params) external onlyOwner {
+        _updateImpl(id, implementationAddress, params);
         emit AddressSet(id, implementationAddress, true);
     }
 
@@ -72,7 +75,7 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @param id The id
      * @param newAddress The address to set
      */
-    function setAddress(bytes32 id, address newAddress) external override onlyOwner {
+    function setAddress(bytes32 id, address newAddress) external onlyOwner {
         _addresses[id] = newAddress;
         emit AddressSet(id, newAddress, false);
     }
@@ -81,7 +84,7 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @dev Returns an address by id
      * @return The address
      */
-    function getAddress(bytes32 id) public view override returns (address) {
+    function getAddress(bytes32 id) public view returns (address) {
         return _addresses[id];
     }
 
@@ -90,7 +93,7 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @return The LendingPool proxy address
      *
      */
-    function getLendingPool() external view override returns (address) {
+    function getLendingPool() external view returns (address) {
         return getAddress(LENDING_POOL);
     }
 
@@ -100,8 +103,9 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @param pool The new LendingPool implementation
      *
      */
-    function setLendingPoolImpl(address pool) external override onlyOwner {
-        _updateImpl(LENDING_POOL, pool);
+    function setLendingPoolImpl(address pool) external onlyOwner {
+        bytes memory params = abi.encodeWithSignature("initialize(address)", address(this));
+        _updateImpl(LENDING_POOL, pool, params);
         emit LendingPoolUpdated(pool);
     }
 
@@ -110,7 +114,7 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @return The LendingPoolConfigurator proxy address
      *
      */
-    function getLendingPoolConfigurator() external view override returns (address) {
+    function getLendingPoolConfigurator() external view returns (address) {
         return getAddress(LENDING_POOL_CONFIGURATOR);
     }
 
@@ -120,8 +124,9 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @param configurator The new LendingPoolConfigurator implementation
      *
      */
-    function setLendingPoolConfiguratorImpl(address configurator) external override onlyOwner {
-        _updateImpl(LENDING_POOL_CONFIGURATOR, configurator);
+    function setLendingPoolConfiguratorImpl(address configurator) external onlyOwner {
+        bytes memory params = abi.encodeWithSignature("initialize(address, address)", address(this), _proxyAdmin);
+        _updateImpl(LENDING_POOL_CONFIGURATOR, configurator, params);
         emit LendingPoolConfiguratorUpdated(configurator);
     }
 
@@ -132,7 +137,7 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @return The address of the LendingPoolCollateralManager
      *
      */
-    function getLendingPoolCollateralManager() external view override returns (address) {
+    function getLendingPoolCollateralManager() external view returns (address) {
         return getAddress(LENDING_POOL_COLLATERAL_MANAGER);
     }
 
@@ -141,7 +146,7 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @param manager The new LendingPoolCollateralManager address
      *
      */
-    function setLendingPoolCollateralManager(address manager) external override onlyOwner {
+    function setLendingPoolCollateralManager(address manager) external onlyOwner {
         _addresses[LENDING_POOL_COLLATERAL_MANAGER] = manager;
         emit LendingPoolCollateralManagerUpdated(manager);
     }
@@ -151,38 +156,38 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * of the protocol hence the upgradable proxy pattern is not used
      *
      */
-    function getPoolAdmin() external view override returns (address) {
+    function getPoolAdmin() external view returns (address) {
         return getAddress(POOL_ADMIN);
     }
 
-    function setPoolAdmin(address admin) external override onlyOwner {
+    function setPoolAdmin(address admin) external onlyOwner {
         _addresses[POOL_ADMIN] = admin;
         emit ConfigurationAdminUpdated(admin);
     }
 
-    function getEmergencyAdmin() external view override returns (address) {
+    function getEmergencyAdmin() external view returns (address) {
         return getAddress(EMERGENCY_ADMIN);
     }
 
-    function setEmergencyAdmin(address emergencyAdmin) external override onlyOwner {
+    function setEmergencyAdmin(address emergencyAdmin) external onlyOwner {
         _addresses[EMERGENCY_ADMIN] = emergencyAdmin;
         emit EmergencyAdminUpdated(emergencyAdmin);
     }
 
-    function getPriceOracle() external view override returns (address) {
+    function getPriceOracle() external view returns (address) {
         return getAddress(PRICE_ORACLE);
     }
 
-    function setPriceOracle(address priceOracle) external override onlyOwner {
+    function setPriceOracle(address priceOracle) external onlyOwner {
         _addresses[PRICE_ORACLE] = priceOracle;
         emit PriceOracleUpdated(priceOracle);
     }
 
-    function getLendingRateOracle() external view override returns (address) {
+    function getLendingRateOracle() external view returns (address) {
         return getAddress(LENDING_RATE_ORACLE);
     }
 
-    function setLendingRateOracle(address lendingRateOracle) external override onlyOwner {
+    function setLendingRateOracle(address lendingRateOracle) external onlyOwner {
         _addresses[LENDING_RATE_ORACLE] = lendingRateOracle;
         emit LendingRateOracleUpdated(lendingRateOracle);
     }
@@ -197,16 +202,13 @@ contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProv
      * @param newAddress The address of the new implementation
      *
      */
-    function _updateImpl(bytes32 id, address newAddress) internal {
+    // TODO: initialization param will be diff acc to diff
+    function _updateImpl(bytes32 id, address newAddress, bytes memory params) internal {
         address payable proxyAddress = payable(_addresses[id]);
 
-        InitializableImmutableAdminUpgradeabilityProxy proxy =
-            InitializableImmutableAdminUpgradeabilityProxy(proxyAddress);
-        bytes memory params = abi.encodeWithSignature("initialize(address)", address(this));
-
+        TransparentUpgradeableProxy proxy = TransparentUpgradeableProxy(proxyAddress);
         if (proxyAddress == address(0)) {
-            proxy = new InitializableImmutableAdminUpgradeabilityProxy(address(this));
-            proxy.initialize(newAddress, params);
+            proxy = new TransparentUpgradeableProxy(newAddress, _proxyAdmin, params);
             _addresses[id] = address(proxy);
             emit ProxyCreated(id, address(proxy));
         } else {

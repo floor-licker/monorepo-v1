@@ -22,7 +22,7 @@ import {DataTypes} from "./libraries/types/DataTypes.sol";
  * @title LendingPoolConfigurator contract
  * @author Aave
  * @dev Implements the configuration methods for the Aave protocol
- * NOTE: PoolAdmin wouldn't be able to upgrade the implementation of the proxy, 
+ * NOTE: PoolAdmin wouldn't be able to upgrade the implementation of the proxy,
  * but the proxyAdmin can.
  */
 contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
@@ -70,7 +70,7 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
             _initReserve(cachedPool, input[i]);
         }
     }
-    
+
     function _initReserve(ILendingPool pool, InitReserveInput calldata input) internal {
         address aTokenProxyAddress = _initTokenWithProxy(
             input.aTokenImpl,
@@ -434,30 +434,21 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
         pool.setPause(val);
     }
 
-    function _initTokenWithProxy(
-        address implementation,
-        bytes memory initParams
-    ) internal returns (address) {
+    function _initTokenWithProxy(address implementation, bytes memory initParams) internal returns (address) {
         // Deploy new transparent proxy
-        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
-            implementation,
-            proxyAdmin,
-            initParams
-        );
+        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(implementation, proxyAdmin, initParams);
 
         return address(proxy);
     }
 
-    function _upgradeTokenImplementation(
-        address proxyAddress,
-        address implementation,
-        bytes memory initParams
-    ) internal {
+    function _upgradeTokenImplementation(address proxyAddress, address implementation, bytes memory initParams)
+        internal
+    {
         TransparentUpgradeableProxy proxy = TransparentUpgradeableProxy(payable(proxyAddress));
-        
+
         // Get the proxy admin
         ProxyAdmin _proxyAdmin = ProxyAdmin(proxyAdmin);
-        
+
         // Upgrade and call
         _proxyAdmin.upgradeAndCall(proxy, implementation, initParams);
     }
