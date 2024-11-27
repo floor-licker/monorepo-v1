@@ -10,9 +10,9 @@ import {IInitializableAToken} from "./interfaces/IInitializableAToken.sol";
 import {IAaveIncentivesController} from "./interfaces/IAaveIncentivesController.sol";
 import {ILendingPoolConfigurator} from "./interfaces/ILendingPoolConfigurator.sol";
 
-import {VersionedInitializable} from "./libraries/aave-upgradeability/VersionedInitializable.sol";
-import {InitializableImmutableAdminUpgradeabilityProxy} from
-    "./libraries/aave-upgradeability/InitializableImmutableAdminUpgradeabilityProxy.sol";
+import {Initializable} from "@solady/utils/Initializable.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import {ReserveConfiguration} from "./libraries/configuration/ReserveConfiguration.sol";
 import {Errors} from "./libraries/helpers/Errors.sol";
 import {PercentageMath} from "./libraries/math/PercentageMath.sol";
@@ -22,17 +22,24 @@ import {DataTypes} from "./libraries/types/DataTypes.sol";
  * @title LendingPoolConfigurator contract
  * @author Aave
  * @dev Implements the configuration methods for the Aave protocol
- *
+ * NOTE: PoolAdmin wouldn't be able to upgrade the implementation of the proxy, 
+ * but the proxyAdmin can.
  */
-contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigurator {
+contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
     using PercentageMath for uint256;
     using ReserveConfiguration for DataTypes.ReserveConfigurationMap;
 
     ILendingPoolAddressesProvider internal addressesProvider;
     ILendingPool internal pool;
+    address internal proxyAdmin;
 
     modifier onlyPoolAdmin() {
         require(addressesProvider.getPoolAdmin() == msg.sender, Errors.CALLER_NOT_POOL_ADMIN);
+        _;
+    }
+
+    modifier onlyProxyAdminOwner() {
+        require(ProxyAdmin(proxyAdmin).owner() == msg.sender, "Not proxy admin owner");
         _;
     }
 
@@ -43,13 +50,14 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
 
     uint256 internal constant CONFIGURATOR_REVISION = 0x1;
 
-    function getRevision() internal pure override returns (uint256) {
+    function getRevision() internal pure returns (uint256) {
         return CONFIGURATOR_REVISION;
     }
 
-    function initialize(ILendingPoolAddressesProvider provider) public initializer {
+    function initialize(ILendingPoolAddressesProvider provider, address _proxyAdmin) public initializer {
         addressesProvider = provider;
         pool = ILendingPool(addressesProvider.getLendingPool());
+        proxyAdmin = _proxyAdmin;
     }
 
     /**
@@ -62,7 +70,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
             _initReserve(cachedPool, input[i]);
         }
     }
-
+    
     function _initReserve(ILendingPool pool, InitReserveInput calldata input) internal {
         address aTokenProxyAddress = _initTokenWithProxy(
             input.aTokenImpl,
@@ -137,7 +145,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
      * @dev Updates the aToken implementation for the reserve
      *
      */
-    function updateAToken(UpdateATokenInput calldata input) external onlyPoolAdmin {
+    function updateAToken(UpdateATokenInput calldata input) external onlyProxyAdminOwner {
         ILendingPool cachedPool = pool;
 
         DataTypes.ReserveData memory reserveData = cachedPool.getReserveData(input.asset);
@@ -165,7 +173,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
      * @dev Updates the stable debt token implementation for the reserve
      *
      */
-    function updateStableDebtToken(UpdateDebtTokenInput calldata input) external onlyPoolAdmin {
+    function updateStableDebtToken(UpdateDebtTokenInput calldata input) external onlyProxyAdminOwner {
         ILendingPool cachedPool = pool;
 
         DataTypes.ReserveData memory reserveData = cachedPool.getReserveData(input.asset);
@@ -192,7 +200,7 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
      * @dev Updates the variable debt token implementation for the asset
      *
      */
-    function updateVariableDebtToken(UpdateDebtTokenInput calldata input) external onlyPoolAdmin {
+    function updateVariableDebtToken(UpdateDebtTokenInput calldata input) external onlyProxyAdminOwner {
         ILendingPool cachedPool = pool;
 
         DataTypes.ReserveData memory reserveData = cachedPool.getReserveData(input.asset);
@@ -426,22 +434,32 @@ contract LendingPoolConfigurator is VersionedInitializable, ILendingPoolConfigur
         pool.setPause(val);
     }
 
-    function _initTokenWithProxy(address implementation, bytes memory initParams) internal returns (address) {
-        InitializableImmutableAdminUpgradeabilityProxy proxy =
-            new InitializableImmutableAdminUpgradeabilityProxy(address(this));
-
-        proxy.initialize(implementation, initParams);
+    function _initTokenWithProxy(
+        address implementation,
+        bytes memory initParams
+    ) internal returns (address) {
+        // Deploy new transparent proxy
+        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
+            implementation,
+            proxyAdmin,
+            initParams
+        );
 
         return address(proxy);
     }
 
-    function _upgradeTokenImplementation(address proxyAddress, address implementation, bytes memory initParams)
-        internal
-    {
-        InitializableImmutableAdminUpgradeabilityProxy proxy =
-            InitializableImmutableAdminUpgradeabilityProxy(payable(proxyAddress));
-
-        proxy.upgradeToAndCall(implementation, initParams);
+    function _upgradeTokenImplementation(
+        address proxyAddress,
+        address implementation,
+        bytes memory initParams
+    ) internal {
+        TransparentUpgradeableProxy proxy = TransparentUpgradeableProxy(payable(proxyAddress));
+        
+        // Get the proxy admin
+        ProxyAdmin _proxyAdmin = ProxyAdmin(proxyAdmin);
+        
+        // Upgrade and call
+        _proxyAdmin.upgradeAndCall(proxy, implementation, initParams);
     }
 
     function _checkNoLiquidity(address asset) internal view {

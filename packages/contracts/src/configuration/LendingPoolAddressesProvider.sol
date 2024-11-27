@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: agpl-3.0
 pragma solidity 0.8.25;
 
-import {Ownable} from "@openzeppelin/contracts-v5/access/Ownable.sol";
+import {SuperOwnable} from "../interop-std/SuperOwnable.sol";
 
 // Prettier ignore to prevent buidler flatter bug
 // prettier-ignore
@@ -18,7 +18,7 @@ import {ILendingPoolAddressesProvider} from "../interfaces/ILendingPoolAddresses
  * @author Aave
  *
  */
-contract LendingPoolAddressesProvider is Ownable, ILendingPoolAddressesProvider {
+contract LendingPoolAddressesProvider is SuperOwnable, ILendingPoolAddressesProvider {
     string private _marketId;
     mapping(bytes32 => address) private _addresses;
 
@@ -30,7 +30,8 @@ contract LendingPoolAddressesProvider is Ownable, ILendingPoolAddressesProvider 
     bytes32 private constant PRICE_ORACLE = "PRICE_ORACLE";
     bytes32 private constant LENDING_RATE_ORACLE = "LENDING_RATE_ORACLE";
 
-    constructor(string memory marketId, address initialOwner) Ownable(initialOwner) {
+    constructor(string memory marketId, address initialOwner) {
+        _initializeSuperOwner(uint64(block.chainid), initialOwner);
         _setMarketId(marketId);
     }
 
