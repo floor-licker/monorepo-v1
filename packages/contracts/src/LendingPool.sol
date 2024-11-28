@@ -116,8 +116,10 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == Deposit.selector && _identifier.chainId != block.chainid) {
-            (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
+            (address asset, uint256 amount,,, uint256 mintMode, uint256 amountScaled) =
+                abi.decode(_data[64:], (address, uint256, address, uint16, uint256, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
+            IAToken(reserve.aTokenAddress).updateCrossChainBalance(amountScaled, mintMode);
             _updateStates(reserve, asset, amount, 0, bytes2(uint16(3)));
         }
         if (selector == CrossChainDeposit.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
@@ -131,9 +133,9 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == Withdraw.selector && _identifier.chainId != block.chainid) {
-            (address asset, uint256 amount) = abi.decode(_data[32:96], (address, uint256));
+            (address asset,, uint256 amount, uint256 mode, uint256 amountScaled) = abi.decode(_data[64:], (address, address, uint256, uint256, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
-            // IAToken(reserve.aTokenAddress).updateCrossChainBalance(amountScaled);
+            IAToken(reserve.aTokenAddress).updateCrossChainBalance(amountScaled, mode);
             _updateStates(reserve, asset, 0, amount, bytes2(uint16(3)));
         }
         if (selector == CrossChainWithdraw.selector && abi.decode(_data[32:64], (uint256)) == block.chainid) {
@@ -325,7 +327,7 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
             emit ReserveUsedAsCollateralEnabled(asset, onBehalfOf);
         }
 
-        emit Deposit(sender, asset, amount, onBehalfOf, referralCode, amountScaled);
+        emit Deposit(sender, asset, amount, onBehalfOf, referralCode, mintMode, amountScaled);
     }
 
     // Update the DepositInitiated event to include chain IDs
@@ -401,9 +403,9 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
             emit ReserveUsedAsCollateralDisabled(asset, sender);
         }
 
-        IAToken(aToken).burn(sender, to, toChainId, amountToWithdraw, reserve.liquidityIndex);
+        (uint256 mode, uint256 amountScaled) = IAToken(aToken).burn(sender, to, toChainId, amountToWithdraw, reserve.liquidityIndex);
 
-        emit Withdraw(sender, asset, to, amountToWithdraw);
+        emit Withdraw(sender, asset, to, amountToWithdraw, mode, amountScaled);
     }
 
     /**

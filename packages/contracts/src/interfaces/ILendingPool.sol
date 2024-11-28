@@ -11,6 +11,7 @@ import {DataTypes} from "../libraries/types/DataTypes.sol";
  * @param amount The amount deposited
  * @param onBehalfOf The beneficiary of the deposit, receiving the aTokens
  * @param referral The referral code used
+ * @param mintMode The mint mode: 0 for aTokens, 1 for minting, 2 for burning
  * @param amountScaled The amount scaled to the pool's unit
  *
  */
@@ -20,18 +21,21 @@ event Deposit(
     uint256 amount,
     address indexed onBehalfOf,
     uint16 indexed referral,
+    uint256 mintMode,
     uint256 amountScaled
 );
 
 /**
  * @dev Emitted on withdraw()
- * @param reserve The address of the underlyng asset being withdrawn
  * @param user The address initiating the withdrawal, owner of aTokens
+ * @param reserve The address of the underlyng asset being withdrawn
  * @param to Address that will receive the underlying
  * @param amount The amount to be withdrawn
+ * @param mode The mode: 0 for aTokens, 1 for minting, 2 for burning
+ * @param amountScaled The amount scaled to the pool's unit
  *
  */
-event Withdraw(address indexed reserve, address indexed user, address indexed to, uint256 amount);
+event Withdraw(address indexed user, address indexed reserve, address indexed to, uint256 amount, uint256 mode, uint256 amountScaled);
 
 /**
  * @dev Emitted on borrow() and flashLoan() when debt needs to be opened
