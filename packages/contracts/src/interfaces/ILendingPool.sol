@@ -35,7 +35,14 @@ event Deposit(
  * @param amountScaled The amount scaled to the pool's unit
  *
  */
-event Withdraw(address indexed user, address indexed reserve, address indexed to, uint256 amount, uint256 mode, uint256 amountScaled);
+event Withdraw(
+    address indexed user,
+    address indexed reserve,
+    address indexed to,
+    uint256 amount,
+    uint256 mode,
+    uint256 amountScaled
+);
 
 /**
  * @dev Emitted on borrow() and flashLoan() when debt needs to be opened

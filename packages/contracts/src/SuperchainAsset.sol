@@ -3,13 +3,14 @@ pragma solidity ^0.8.25;
 
 import {Predeploys} from "@contracts-bedrock/libraries/Predeploys.sol";
 import {SuperchainERC20} from "@contracts-bedrock/L2/SuperchainERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.sol";
+import {SuperOwnable} from "./interop-std/SuperOwnable.sol";
 
 import {IERC20} from "@openzeppelin/contracts-v5/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts-v5/token/ERC20/utils/SafeERC20.sol";
+import {ILendingPoolAddressesProvider} from "./interfaces/ILendingPoolAddressesProvider.sol";
 
-/// whenever user uses this with SuperchainTokenBridge, the destination chain will mint aToken (if underlying < totalBalances) and transfer underlying remaining
-
-contract SuperchainAsset is SuperchainERC20 {
+/// @dev whenever user uses this with SuperchainTokenBridge, the destination chain will mint aToken (if underlying < totalBalances) and transfer underlying remaining
+contract SuperchainAsset is SuperchainERC20, SuperOwnable {
     using SafeERC20 for IERC20;
 
     string private _name;
@@ -18,12 +19,29 @@ contract SuperchainAsset is SuperchainERC20 {
     address public underlying; // address of underlying asset
     mapping(address user => uint256 balance) public balances; // user balance of underlying
     uint256 public totalBalances; // total balances of underlying
+    ILendingPoolAddressesProvider public immutable provider;
 
-    constructor(string memory name_, string memory symbol_, uint8 decimals_, address underlying_) {
+    modifier onlyLendingPoolConfigurator() {
+        require(
+            provider.getLendingPoolConfigurator() == msg.sender, "Only lending pool configurator can call this function"
+        );
+        _;
+    }
+
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        uint8 decimals_,
+        address underlying_,
+        ILendingPoolAddressesProvider provider_,
+        address admin_
+    ) {
         _name = name_;
         _symbol = symbol_;
         _decimals = decimals_;
         underlying = underlying_;
+        provider = provider_;
+        _initializeSuperOwner(uint64(block.chainid), admin_);
     }
 
     function name() public view virtual override returns (string memory) {
@@ -91,5 +109,29 @@ contract SuperchainAsset is SuperchainERC20 {
             balances[recipient] += amount;
         }
         return success;
+    }
+
+    /// @dev bridge underlying to another chain using bungee api
+    function bridgeUnderlying(address payable _to, bytes memory txData, address _allowanceTarget, uint256 _amount)
+        external
+        onlyLendingPoolConfigurator
+    {
+        require(_amount <= totalBalances - totalSupply(), "Amount exceeds excess balance");
+        IERC20(underlying).approve(_allowanceTarget, _amount);
+        (bool success,) = _to.call(txData);
+        require(success);
+    }
+
+    /// @dev During bridging, we may receive anyTokens / hTokens if there's not enough underlying
+    // therefore we may need to withdraw them and manually swap
+    function withdrawTokens(address _token, address _recepient) public onlyOwner {
+        require(_token != underlying, "Cannot withdraw underlying");
+        uint256 amount = IERC20(_token).balanceOf(address(this));
+        IERC20(_token).safeTransfer(_recepient, amount);
+    }
+
+    /// @dev Override version function from both parent contracts
+    function version() external view override(SuperchainERC20, SuperOwnable) returns (string memory) {
+        return "1.0.0";
     }
 }

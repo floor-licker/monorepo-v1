@@ -133,7 +133,8 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
         /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
         if (selector == Withdraw.selector && _identifier.chainId != block.chainid) {
-            (address asset,, uint256 amount, uint256 mode, uint256 amountScaled) = abi.decode(_data[64:], (address, address, uint256, uint256, uint256));
+            (address asset,, uint256 amount, uint256 mode, uint256 amountScaled) =
+                abi.decode(_data[64:], (address, address, uint256, uint256, uint256));
             DataTypes.ReserveData storage reserve = _reserves[asset];
             IAToken(reserve.aTokenAddress).updateCrossChainBalance(amountScaled, mode);
             _updateStates(reserve, asset, 0, amount, bytes2(uint16(3)));
@@ -403,7 +404,8 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
             emit ReserveUsedAsCollateralDisabled(asset, sender);
         }
 
-        (uint256 mode, uint256 amountScaled) = IAToken(aToken).burn(sender, to, toChainId, amountToWithdraw, reserve.liquidityIndex);
+        (uint256 mode, uint256 amountScaled) =
+            IAToken(aToken).burn(sender, to, toChainId, amountToWithdraw, reserve.liquidityIndex);
 
         emit Withdraw(sender, asset, to, amountToWithdraw, mode, amountScaled);
     }
