@@ -15,3 +15,14 @@ We're gearing up for our alpha launch and looking for marketing-savvy contributo
 
 Please join our [Telegram Working Group](https://t.me/+sybc0z6anTgzMjc1) or open an issue to discuss how you can help shape SuperLend's market presence. Let's build something amazing together! 🚀
 
+### 🔒 Security Contributors Needed
+
+We're looking for security-minded contributors to help strengthen our protocol! If you have experience or interest in:
+- Smart contract security
+- Code review and testing
+- Security documentation
+- Threat modeling
+- Best practices implementation
+
+Whether you're a security enthusiast or experienced researcher, we welcome your contributions to make SuperLend more secure. Join our [Telegram Working Group](https://t.me/+sybc0z6anTgzMjc1) or open an issue to discuss how you can help. Let's build a safer DeFi ecosystem together! 🛡️
+
