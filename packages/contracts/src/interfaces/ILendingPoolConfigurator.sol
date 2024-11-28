@@ -11,6 +11,7 @@ interface ILendingPoolConfigurator {
         address underlyingAsset;
         address treasury;
         address incentivesController;
+        address superchainAsset;
         string underlyingAssetName;
         string aTokenName;
         string aTokenSymbol;
@@ -19,6 +20,7 @@ interface ILendingPoolConfigurator {
         string stableDebtTokenName;
         string stableDebtTokenSymbol;
         bytes params;
+        bytes32 salt;
     }
 
     struct UpdateATokenInput {

@@ -150,6 +150,7 @@ library ReserveLogic {
     function init(
         DataTypes.ReserveData storage reserve,
         address aTokenAddress,
+        address superchainAsset,
         address stableDebtTokenAddress,
         address variableDebtTokenAddress,
         address interestRateStrategyAddress
@@ -159,6 +160,7 @@ library ReserveLogic {
         reserve.liquidityIndex = uint128(WadRayMath.ray());
         reserve.variableBorrowIndex = uint128(WadRayMath.ray());
         reserve.aTokenAddress = aTokenAddress;
+        reserve.superchainAssetAddress = superchainAsset;
         reserve.stableDebtTokenAddress = stableDebtTokenAddress;
         reserve.variableDebtTokenAddress = variableDebtTokenAddress;
         reserve.interestRateStrategyAddress = interestRateStrategyAddress;

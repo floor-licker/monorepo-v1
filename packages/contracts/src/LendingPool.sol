@@ -1117,6 +1117,7 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
      * - Only callable by the LendingPoolConfigurator contract
      * @param asset The address of the underlying asset of the reserve
      * @param aTokenAddress The address of the aToken that will be assigned to the reserve
+     * @param superchainAsset The address of the SuperchainAsset that will be assigned to the reserve
      * @param stableDebtAddress The address of the StableDebtToken that will be assigned to the reserve
      * @param aTokenAddress The address of the VariableDebtToken that will be assigned to the reserve
      * @param interestRateStrategyAddress The address of the interest rate strategy contract
@@ -1124,13 +1125,14 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
      */
     function initReserve(
         address asset,
+        address superchainAsset,
         address aTokenAddress,
         address stableDebtAddress,
         address variableDebtAddress,
         address interestRateStrategyAddress
     ) external onlyLendingPoolConfigurator {
         require(asset.code.length > 0, Errors.LP_NOT_CONTRACT);
-        _reserves[asset].init(aTokenAddress, stableDebtAddress, variableDebtAddress, interestRateStrategyAddress);
+        _reserves[asset].init(aTokenAddress, superchainAsset, stableDebtAddress, variableDebtAddress, interestRateStrategyAddress);
         _addReserveToList(asset);
     }
 

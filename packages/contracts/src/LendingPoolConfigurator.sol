@@ -84,7 +84,8 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
                 input.aTokenName,
                 input.aTokenSymbol,
                 input.params
-            )
+            ),
+            input.salt
         );
 
         address stableDebtTokenProxyAddress = _initTokenWithProxy(
@@ -98,7 +99,8 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
                 input.stableDebtTokenName,
                 input.stableDebtTokenSymbol,
                 input.params
-            )
+            ),
+            input.salt
         );
 
         address variableDebtTokenProxyAddress = _initTokenWithProxy(
@@ -112,12 +114,14 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
                 input.variableDebtTokenName,
                 input.variableDebtTokenSymbol,
                 input.params
-            )
+            ),
+            input.salt
         );
-
+        
         pool.initReserve(
             input.underlyingAsset,
             aTokenProxyAddress,
+            input.superchainAsset,
             stableDebtTokenProxyAddress,
             variableDebtTokenProxyAddress,
             input.interestRateStrategyAddress
@@ -434,11 +438,26 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
         pool.setPause(val);
     }
 
-    function _initTokenWithProxy(address implementation, bytes memory initParams) internal returns (address) {
-        // Deploy new transparent proxy
-        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(implementation, proxyAdmin, initParams);
-
-        return address(proxy);
+    function _initTokenWithProxy(address implementation, bytes memory initParams, bytes32 _salt) internal returns (address) {
+        // Generate salt based on implementation and init params
+        bytes32 salt = keccak256(abi.encodePacked(implementation, _salt));
+        
+        // Create the proxy initialization code
+        bytes memory proxyInitCode = abi.encodePacked(
+            type(TransparentUpgradeableProxy).creationCode,
+            abi.encode(implementation, proxyAdmin, initParams)
+        );
+        
+        // Deploy using Create2
+        address proxyAddress;
+        assembly {
+            proxyAddress := create2(0, add(proxyInitCode, 0x20), mload(proxyInitCode), salt)
+            if iszero(extcodesize(proxyAddress)) {
+                revert(0, 0)
+            }
+        }
+        
+        return proxyAddress;
     }
 
     function _upgradeTokenImplementation(address proxyAddress, address implementation, bytes memory initParams)

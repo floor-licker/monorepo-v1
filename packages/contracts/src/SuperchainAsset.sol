@@ -131,7 +131,7 @@ contract SuperchainAsset is SuperchainERC20, SuperOwnable {
     }
 
     /// @dev Override version function from both parent contracts
-    function version() external view override(SuperchainERC20, SuperOwnable) returns (string memory) {
+    function version() external pure override(SuperchainERC20, SuperOwnable) returns (string memory) {
         return "1.0.0";
     }
 }

@@ -237,6 +237,7 @@ interface ILendingPool {
     function initReserve(
         address reserve,
         address aTokenAddress,
+        address superchainAsset,
         address stableDebtAddress,
         address variableDebtAddress,
         address interestRateStrategyAddress
