@@ -11,8 +11,10 @@ import {ILendingPool} from "../interfaces/ILendingPool.sol";
 import {IAToken} from "../interfaces/IAToken.sol";
 import {IncentivizedERC20} from "./IncentivizedERC20.sol";
 import {IAaveIncentivesController} from "../interfaces/IAaveIncentivesController.sol";
+import {ILendingPoolAddressesProvider} from "../interfaces/ILendingPoolAddressesProvider.sol";
 
 import {Predeploys} from "@contracts-bedrock/libraries/Predeploys.sol";
+import "@contracts-bedrock/L2/interfaces/ICrossL2Inbox.sol";
 import {ISuperchainAsset} from "../interfaces/ISuperchainAsset.sol";
 import {ISuperchainTokenBridge} from "@contracts-bedrock/L2/interfaces/ISuperchainTokenBridge.sol";
 
@@ -42,10 +44,22 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
     address internal _treasury;
     address internal _underlyingAsset;
     IAaveIncentivesController internal _incentivesController;
+    ILendingPoolAddressesProvider internal _addressesProvider;
+
+    event CrossChainMint(address indexed user, uint256 amount, uint256 index);
 
     modifier onlyLendingPool() {
         require(_msgSender() == address(_pool), Errors.CT_CALLER_MUST_BE_LENDING_POOL);
         _;
+    }
+
+    modifier onlyRelayer() {
+        _onlyRelayer();
+        _;
+    }
+
+    function _onlyRelayer() internal view {
+        require(_addressesProvider.getRelayer() == msg.sender, "!relayer");
     }
 
     function getRevision() internal pure virtual returns (uint256) {
@@ -67,6 +81,7 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
         address treasury,
         address underlyingAsset,
         IAaveIncentivesController incentivesController,
+        ILendingPoolAddressesProvider addressesProvider,
         uint8 aTokenDecimals,
         string calldata aTokenName,
         string calldata aTokenSymbol,
@@ -91,7 +106,7 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
         _treasury = treasury;
         _underlyingAsset = underlyingAsset;
         _incentivesController = incentivesController;
-
+        _addressesProvider = addressesProvider;
         emit Initialized(
             underlyingAsset,
             address(pool),
@@ -102,6 +117,19 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
             aTokenSymbol,
             params
         );
+    }
+
+    function dispatch(Identifier calldata _identifier, bytes calldata _data) external onlyRelayer {
+        if (_identifier.origin != address(this)) revert("!origin");
+        ICrossL2Inbox(Predeploys.CROSS_L2_INBOX).validateMessage(_identifier, keccak256(_data));
+
+        bytes32 selector = abi.decode(_data[:32], (bytes32));
+        if (selector == CrossChainMint.selector && _identifier.chainId != block.chainid) {
+            (, uint256 amount,) = abi.decode(_data[32:], (address, uint256, uint256));
+            _totalCrossChainSupply += amount;
+        }
+
+        revert("Invalid selector");
     }
 
     /**
@@ -163,7 +191,7 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
         onlyLendingPool
         returns (bool, uint256, uint256)
     {
-        uint256 previousBalance = super.balanceOf(user); // TODO this should return the complete balance across all chains
+        uint256 previousBalance = super.balanceOf(user);
 
         uint256 amountScaled = amount.rayDiv(index);
         require(amountScaled != 0, Errors.CT_INVALID_MINT_AMOUNT);
@@ -201,6 +229,7 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
 
         emit Transfer(address(0), treasury, amount);
         emit Mint(treasury, amount, index);
+        emit CrossChainMint(treasury, amount.rayDiv(index), index);
 
         return (1, amount.rayDiv(index));
     }

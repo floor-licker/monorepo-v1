@@ -78,18 +78,31 @@ event Borrow(
  * @param amount The amount repaid
  * @param user The beneficiary of the repayment, getting his debt reduced
  * @param repayer The address of the user initiating the repay(), providing the funds
+ * @param rateMode The rate mode: 1 for Stable, 2 for Variable
+ * @param mode 1 if minting, 2 if burning
+ * @param amountBurned The amount of debt being burned
  *
  */
-event Repay(address indexed reserve, uint256 amount, address indexed user, address indexed repayer);
+event Repay(
+    address indexed reserve,
+    uint256 amount,
+    address indexed user,
+    address indexed repayer,
+    uint256 rateMode,
+    uint256 mode,
+    uint256 amountBurned
+);
 
 /**
  * @dev Emitted on swapBorrowRateMode()
  * @param reserve The address of the underlying asset of the reserve
  * @param user The address of the user swapping his rate mode
  * @param rateMode The rate mode that the user wants to swap to
+ * @param variableDebtAmount The amount of variable debt being minted
+ * @param stableDebtAmount The amount of stable debt being minted
  *
  */
-event Swap(address indexed reserve, address indexed user, uint256 rateMode);
+event Swap(address indexed reserve, address indexed user, uint256 rateMode, uint256 variableDebtAmount, uint256 stableDebtAmount);
 
 /**
  * @dev Emitted on setUserUseReserveAsCollateral()
@@ -111,9 +124,13 @@ event ReserveUsedAsCollateralDisabled(address indexed reserve, address indexed u
  * @dev Emitted on rebalanceStableBorrowRate()
  * @param reserve The address of the underlying asset of the reserve
  * @param user The address of the user for which the rebalance has been executed
+ * @param amountBurned The amount of stable debt burned
+ * @param amountMinted The amount of stable debt minted
  *
  */
-event RebalanceStableBorrowRate(address indexed reserve, address indexed user);
+event RebalanceStableBorrowRate(
+    address indexed reserve, address indexed user, uint256 amountBurned, uint256 amountMinted
+);
 
 /**
  * @dev Emitted on flashLoan()
@@ -150,7 +167,9 @@ event FlashLoan(
  * @param liquidator The address of the liquidator
  * @param receiveAToken `true` if the liquidators wants to receive the collateral aTokens, `false` if he wants
  * to receive the underlying collateral asset directly
- *
+ * @param stableDebtBurned The amount of stable debt burned
+ * @param variableDebtBurned The amount of variable debt burned
+ * @param collateralATokenBurned The amount of collateral aTokens burned
  */
 event LiquidationCall(
     address indexed collateralAsset,
@@ -159,7 +178,10 @@ event LiquidationCall(
     uint256 debtToCover,
     uint256 liquidatedCollateralAmount,
     address liquidator,
-    bool receiveAToken
+    bool receiveAToken,
+    uint256 stableDebtBurned,
+    uint256 variableDebtBurned,
+    uint256 collateralATokenBurned
 );
 
 interface ILendingPool {

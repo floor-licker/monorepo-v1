@@ -24,7 +24,6 @@ library UserConfiguration {
         self.data = (self.data & ~(1 << (reserveIndex * 2))) | (uint256(borrowing ? 1 : 0) << (reserveIndex * 2));
     }
 
-    // TODO: make this a cross chain function
     /**
      * @dev Sets if the user is using as collateral the reserve identified by reserveIndex
      * @param self The configuration object

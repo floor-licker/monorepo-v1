@@ -60,7 +60,6 @@ contract SuperchainAsset is SuperchainERC20, SuperOwnable {
     /// only callable by SuperchainTokenBridge (which has already burned the aToken amount on source chain)
     function _mint(address to_, uint256 amount_) internal override {
         if (amount_ > totalBalances) {
-            /// TODO gas optimize this
             // need to mint more than totalBalances
             balances[to_] += amount_ - totalBalances;
             super._mint(to_, amount_ - totalBalances);
@@ -124,7 +123,7 @@ contract SuperchainAsset is SuperchainERC20, SuperOwnable {
 
     /// @dev During bridging, we may receive anyTokens / hTokens if there's not enough underlying
     // therefore we may need to withdraw them and manually swap
-    function withdrawTokens(address _token, address _recepient) public onlyOwner {
+    function withdrawTokens(address _token, address _recepient) public onlyLendingPoolConfigurator {
         require(_token != underlying, "Cannot withdraw underlying");
         uint256 amount = IERC20(_token).balanceOf(address(this));
         IERC20(_token).safeTransfer(_recepient, amount);

@@ -9,6 +9,7 @@ import {IInitializableDebtToken} from "./interfaces/IInitializableDebtToken.sol"
 import {IInitializableAToken} from "./interfaces/IInitializableAToken.sol";
 import {IAaveIncentivesController} from "./interfaces/IAaveIncentivesController.sol";
 import {ILendingPoolConfigurator} from "./interfaces/ILendingPoolConfigurator.sol";
+import {ISuperchainAsset} from "./interfaces/ISuperchainAsset.sol";
 
 import {Initializable} from "@solady/utils/Initializable.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
@@ -80,6 +81,7 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
                 input.treasury,
                 input.underlyingAsset,
                 IAaveIncentivesController(input.incentivesController),
+                addressesProvider,
                 input.underlyingAssetDecimals,
                 input.aTokenName,
                 input.aTokenSymbol,
@@ -117,7 +119,7 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
             ),
             input.salt
         );
-        
+
         pool.initReserve(
             input.underlyingAsset,
             aTokenProxyAddress,
@@ -145,10 +147,14 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
         );
     }
 
+    function withdrawSuperchainAssetSentToken(address asset, address recepient) external onlyProxyAdminOwner {
+        ISuperchainAsset(asset).withdrawTokens(asset, recepient);
+    }
     /**
      * @dev Updates the aToken implementation for the reserve
      *
      */
+
     function updateAToken(UpdateATokenInput calldata input) external onlyProxyAdminOwner {
         ILendingPool cachedPool = pool;
 
@@ -438,25 +444,25 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
         pool.setPause(val);
     }
 
-    function _initTokenWithProxy(address implementation, bytes memory initParams, bytes32 _salt) internal returns (address) {
+    function _initTokenWithProxy(address implementation, bytes memory initParams, bytes32 _salt)
+        internal
+        returns (address)
+    {
         // Generate salt based on implementation and init params
         bytes32 salt = keccak256(abi.encodePacked(implementation, _salt));
-        
+
         // Create the proxy initialization code
         bytes memory proxyInitCode = abi.encodePacked(
-            type(TransparentUpgradeableProxy).creationCode,
-            abi.encode(implementation, proxyAdmin, initParams)
+            type(TransparentUpgradeableProxy).creationCode, abi.encode(implementation, proxyAdmin, initParams)
         );
-        
+
         // Deploy using Create2
         address proxyAddress;
         assembly {
             proxyAddress := create2(0, add(proxyInitCode, 0x20), mload(proxyInitCode), salt)
-            if iszero(extcodesize(proxyAddress)) {
-                revert(0, 0)
-            }
+            if iszero(extcodesize(proxyAddress)) { revert(0, 0) }
         }
-        
+
         return proxyAddress;
     }
 

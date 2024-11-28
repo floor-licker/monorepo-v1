@@ -142,18 +142,21 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Initiali
 
         ReserveLogic.updateState(debtReserve);
 
+        uint256 stableDebtBurned = 0;
+        uint256 variableDebtBurned = 0;
+
         if (vars.userVariableDebt >= vars.actualDebtToLiquidate) {
-            IVariableDebtToken(debtReserve.variableDebtTokenAddress).burn(
+            (, variableDebtBurned) = IVariableDebtToken(debtReserve.variableDebtTokenAddress).burn(
                 user, vars.actualDebtToLiquidate, debtReserve.variableBorrowIndex
             );
         } else {
             // If the user doesn't have variable debt, no need to try to burn variable debt tokens
             if (vars.userVariableDebt > 0) {
-                IVariableDebtToken(debtReserve.variableDebtTokenAddress).burn(
+                (, variableDebtBurned) = IVariableDebtToken(debtReserve.variableDebtTokenAddress).burn(
                     user, vars.userVariableDebt, debtReserve.variableBorrowIndex
                 );
             }
-            IStableDebtToken(debtReserve.stableDebtTokenAddress).burn(
+            (, stableDebtBurned) = IStableDebtToken(debtReserve.stableDebtTokenAddress).burn(
                 user, vars.actualDebtToLiquidate - vars.userVariableDebt
             );
         }
@@ -162,6 +165,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Initiali
             debtReserve, debtAsset, debtReserve.aTokenAddress, vars.actualDebtToLiquidate, 0
         );
 
+        uint256 collateralATokenBurned = 0;
         if (receiveAToken) {
             vars.liquidatorPreviousATokenBalance = IERC20(vars.collateralAtoken).balanceOf(sender);
             vars.collateralAtoken.transferOnLiquidation(user, sender, vars.maxCollateralToLiquidate);
@@ -177,7 +181,7 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Initiali
                 collateralAsset, address(vars.collateralAtoken), 0, vars.maxCollateralToLiquidate
             );
 
-            vars.collateralAtoken.burn(
+            (, collateralATokenBurned) = vars.collateralAtoken.burn(
                 user, sender, sendToChainId, vars.maxCollateralToLiquidate, collateralReserve.liquidityIndex
             );
         }
@@ -199,14 +203,16 @@ contract LendingPoolCollateralManager is ILendingPoolCollateralManager, Initiali
         }
 
         emit LiquidationCall(
-            sender,
             collateralAsset,
             debtAsset,
             user,
             vars.actualDebtToLiquidate,
             vars.maxCollateralToLiquidate,
             sender,
-            receiveAToken
+            receiveAToken,
+            stableDebtBurned,
+            variableDebtBurned,
+            collateralATokenBurned
         );
 
         return (uint256(Errors.CollateralManagerErrors.NO_ERROR), Errors.LPCM_NO_ERRORS);

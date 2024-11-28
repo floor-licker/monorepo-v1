@@ -43,4 +43,16 @@ interface ISuperchainAsset {
     /// @param user The address to get the balance of
     /// @return The underlying asset balance of the user
     function balances(address user) external view returns (uint256);
+
+    /// @notice Withdraw tokens sent to the contract
+    /// @param _token The address of the token to withdraw
+    /// @param _recepient The address to withdraw tokens to
+    function withdrawTokens(address _token, address _recepient) external;
+
+    function version() external pure returns (string memory);
+
+    function underlying() external view returns (address);
+
+    function bridgeUnderlying(address payable _to, bytes memory txData, address _allowanceTarget, uint256 _amount)
+        external;
 }
