@@ -170,6 +170,7 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
         vars.previousSupply = totalSupply();
         vars.currentAvgStableRate = _avgStableRate;
         _totalSupply += amount;
+        _totalCrossChainSupply += amount;
         vars.nextSupply = vars.previousSupply + amount;
 
         vars.amountInRay = amount.wadToRay();
@@ -189,7 +190,7 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
             _avgStableRate.rayMul(vars.previousSupply.wadToRay()) + rate.rayMul(vars.amountInRay)
         ) / vars.nextSupply.wadToRay();
 
-        _mint(onBehalfOf, amount + balanceIncrease, vars.previousSupply);
+        _mint(onBehalfOf, amount + balanceIncrease, _totalSupply);
 
         emit Transfer(address(0), onBehalfOf, amount);
 
@@ -204,7 +205,7 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
             vars.nextSupply
         );
 
-        return (currentBalance == 0, 1, balanceIncrease);
+        return (currentBalance == 0, 1, amount);
     }
 
     /**
@@ -216,7 +217,7 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
     function burn(address user, uint256 amount) external override onlyLendingPool returns (uint256, uint256) {
         (, uint256 currentBalance, uint256 balanceIncrease) = _calculateBalanceIncrease(user);
 
-        uint256 previousSupply = totalSupply();
+        uint256 previousSupply = totalSupply(); /// @dev here the totalSupply is totalCrossChainSupply
         uint256 newAvgStableRate = 0;
         uint256 nextSupply = 0;
         uint256 userStableRate = _usersStableRate[user];
@@ -224,8 +225,11 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
         if (previousSupply <= amount) {
             _avgStableRate = 0;
             _totalSupply = 0;
+            _totalCrossChainSupply -= amount;
         } else {
-            nextSupply = _totalSupply = previousSupply - amount;
+            _totalSupply -= amount;
+            _totalCrossChainSupply -= amount;
+            nextSupply = _totalCrossChainSupply;
             uint256 firstTerm = _avgStableRate.rayMul(previousSupply.wadToRay());
             uint256 secondTerm = userStableRate.rayMul(amount.wadToRay());
 
