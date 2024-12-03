@@ -113,9 +113,6 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
     }
 
     function dispatch(Identifier calldata _identifier, bytes calldata _data) external onlyRelayer whenNotPaused {
-        if (_identifier.origin != address(this)) revert OriginNotSuperLend();
-        ICrossL2Inbox(Predeploys.CROSS_L2_INBOX).validateMessage(_identifier, keccak256(_data));
-
         bytes32 selector = abi.decode(_data[:32], (bytes32));
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
