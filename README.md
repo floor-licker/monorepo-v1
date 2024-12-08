@@ -1,184 +1,198 @@
-
 # Introduction
-Riftlend is a lending and borrowing protocol built on super-chain . It means users can 
-hassle-freely lend and borrow across all the L2 chains OP superchain supports.
 
-We are a fork of AAVE v2 with major changes in the code that's why you'll see a lot of stuff is similar to how aave v2 works 
-with considerable changes to support super-chain paradigm instead of siloed versions of aave v2 on each chain.
+RiftLend is a revolutionary new lending and borrowing protocol native to the OP super-chain ecosystem, enabling seamless cross-chain lending and borrowing across all supported L2 networks. By leveraging the power of interop's, RiftLend eliminates traditional barriers between chains, creating a unified liquidity landscape.
 
-Our driving force is to abstract away the details of underlying chains from users and give them an experience closest to whay they see on CEXs.
-Our approach , among other things , ensures that interest rates remain uniform across all the chains for a seemless experience .
+Based on the battle-tested Aave V2 architecture, RiftLend introduces innovations to fully embrace the superchain paradigm, eliminating the need for isolated protocol instances across chains. Our protocol abstracts chain-specific complexities to deliver a seamless, CEX-like experience featuring:
 
-## How it works ( Level 1 : A high level guide )
+- Unified interest rates across all supported L2 chains
+- Chain-agnostic lending and borrowing capabilities
+- Seamless crosschain asset management
+- Native superchain asset support
 
-You might be wondering how RiftLend works ?
-let's see it .
+Users can freely lend assets from any supported chain and borrow on their preferred destination chain without managing complex cross-chain interactions or dealing with fragmented liquidity pools.
 
-So in order to understand things , assuming you don't know much about aave v2 , we'll start with basics 
-and build up from there.
+## Key Features
 
-Here are some key points to note to understand the system .
+- **Cross-Chain Interoperability**: Native integration with OP Stack interop for seamless cross-chain operations
+- **Capital Efficiency**: Unified liquidity pools across L2s minimize fragmentation
+- **Battle-Tested Foundation**: Built on Aave V2's proven architecture
+- **User Experience**: CEX-like simplicity for cross-chain lending/borrowing
 
-- A Market in Riftlend is an instance of LendingPool designated for each asset . 
-i.e USDC and UNI tokens will each have different market in Riftlend .
+## Architecture Overview
 
-- Each Market/LendingPool is behind a proxy . The users interact with LendingPool's proxy and those calls are forwarded to the implementation of LendingPool.
+### Core Components
 
-- Each LendingPool has a lot of addresses to manage ( store , update and retrieve from ) , the `LendingPoolAddressesProvider` acts as ` Main registry of addresses part of or connected to the protocol, including permissioned roles. Acting also as factory of proxies and admin of those, so with right to change its implementations`
+- **Markets**: Each supported asset (e.g. USDC, UNI) has a dedicated LendingPool instance that manages all lending/borrowing activity for that asset across all supported L2 chains
+- **Proxy Pattern**: All LendingPools operate behind upgradeable proxies, allowing protocol improvements while preserving user balances and state
+- **Address Management**: LendingPoolAddressesProvider acts as the central registry and factory, managing protocol component addresses and cross-chain communication
+- **Governance**: Protocol governance will maintain ownership of LendingPoolAddressesProvider to coordinate protocol-wide updates and risk parameters
 
-- In future , we will have protocol governance and Protocol Governance owns `LendingPoolAddressesProvider` which owns proxies of LendingPools
+### Primary Features
 
-- As stated earlier `LendingPoolAddressesProvider` points to only one market ( Only one lendingPool) 
+The LendingPool contract serves as the main interaction point for users, offering:
 
-- Users interact with LendingPool because as beautifully stated in the Code Natspec :
+- **Cross-Chain Deposits/Withdrawals**: Deposit assets on any chain and withdraw on another
+- **Unified Borrowing**: Borrow against your deposits across all supported chains
+- **Dynamic Rate Management**: Switch between variable and stable interest rates
+- **Flexible Collateral**: Enable/disable assets as collateral across chains
+- **Risk Management**: Liquidation mechanism to maintain protocol solvency
+- **Flash Loans**: Single-transaction uncollateralized loans for arbitrage/refinancing
+- **Superchain Asset Support**: Native integration with OP Stack bridged assets
 
+The LendingPool contract provides the following core functionalities:
+
+```solidity
+/**
+ * Main interaction point for users:
+ * - Deposit assets
+ * - Withdraw assets
+ * - Borrow against collateral
+ * - Repay loans
+ * - Toggle between variable/stable rates
+ * - Manage collateral settings
+ * - Execute liquidations
+ * - Perform flash loans
+ */
 ```
-Main point of interaction with an Aave protocol's market
- * - Users can:
- *   # Deposit
- *   # Withdraw
- *   # Borrow
- *   # Repay
- *   # Swap their loans between variable and stable rate
- *   # Enable/disable their deposits as collateral rebalance stable rate borrow positions
- *   # Liquidate positions
- *   # Execute Flash Loans
- * - To be covered by a proxy contract, owned by the LendingPoolAddressesProvider of the specific market
- * - All admin functions are callable by the LendingPoolConfigurator contract defined also in the
- *   LendingPoolAddressesProvider
-```
 
-So this was a good starter to build rapport of how things work on a high level.
-
-
-It's time to go a bit deeper to make you a RiftLend wizard.
-
-Since our main point of interaction is `LendingPool` for each asset, Let's dive into it.
-
-## How it works ? ( Level 2 : A relatively deeper analysis )
-
-### LendingPool
-#### General 
 ![Riftlend flow](https://github.com/user-attachments/assets/83b0251a-6685-46be-b11f-952e3aa74d64)
 
-#### When a user performs a state changing action
+Each LendingPool instance is:
 
-The state changing actions `ActionX` can be anything listed above like Lend, Borrow , Withdraw etc.
+- Controlled by its designated `LendingPoolAddressesProvider`
+- Configured through the `LendingPoolConfigurator`
+- Capable of cross-chain operations through the OP Stack
+
+## How it Works
+
+### Core Concepts
+
+RiftLend's architecture is built on Aave V2's battle-tested foundation, with key modifications to enable cross-chain functionality. Here are the fundamental concepts:
+
+1. **Markets and Lending Pools**
+
+   - Each supported asset (e.g., USDC, UNI) has its own dedicated LendingPool
+   - LendingPools manage all lending and borrowing activities for their respective assets across the supported L2 chains
+
+2. **Proxy Architecture**
+
+   - Each LendingPool operates behind an upgradeable proxy
+   - Users interact with the proxy, which forwards calls to the implementation
+   - Enables protocol upgrades while preserving state and balances
+
+3. **Address Management**
+
+   - The `LendingPoolAddressesProvider` serves as:
+     - Central registry for protocol addresses
+     - Factory for proxy contracts
+     - Administrator for implementation updates
+     - Manager of protocol permissions
+
+4. **Protocol Governance**
+   - Maintains ownership of `LendingPoolAddressesProvider`
+   - Controls protocol upgrades and risk parameters
+   - Manages cross-chain configurations
+
+### User Interactions
 
 ![ActionX flow Riftlend](https://github.com/user-attachments/assets/9d0f567d-8037-411c-a8bb-fb053001aaa9)
 
-Here are the steps involved in the process :
+RiftLend supports various state-changing actions (referred to as `ActionX`) including lending, borrowing, withdrawing, and repaying loans. Here's a detailed breakdown of how these cross-chain actions are processed:
 
-**1. ActionX Initiated:**
+**1. Action Initiation**
 
-   - The user interacts with the Riftlend protocol to perform a state-changing action (e.g., lending, borrowing, repaying, withdrawing, etc.).
+- User interacts with RiftLend's interface to initiate an action (e.g., lending USDC)
+- The protocol receives the request and validates user inputs
 
-**2. Check for Cross-Chain Requirement:**
+**2. Chain Determination**
 
-   - The protocol determines if the ActionX needs to be executed on the current chain or a different chain within the superchain.
+- Protocol checks if the action needs to be executed:
+  - On the current chain (local execution)
+  - On a different chain within the OP Stack (cross-chain execution)
 
-**3. Perform ActionX on Current Chain:**
+**3. Local Execution Path**
 
-   - If the ActionX can be executed on the current chain, the protocol performs the action directly.
-   - An ActionX event is emitted to record the transaction.
+- For same-chain actions:
+  - Action is executed directly on the current chain
+  - State changes are applied immediately
+  - An `ActionExecuted` event is emitted with transaction details
 
-**4. Emit CrossChainX Event:**
+**4. Cross-Chain Execution Path**
 
-   - If the ActionX needs to be executed on a different chain, a CrossChainX event is emitted. This event contains information about the action to be performed, the target chain, and any relevant parameters.
+- For cross-chain actions:
 
-**5. Relayer Reads CrossChainX Event:**
+  1. Protocol emits a `CrossChainAction` event containing:
+     - Action type (lend, borrow, etc.)
+     - Target chain identifier
+     - Required parameters
+     - User address
+  2. Indexer monitors and captures the event
+  3. Relayer constructs a formatted cross-chain message with:
+     - Action specifications
+     - Validated parameters
+     - Required signatures
+  4. Message is dispatched to target chain via OP Stack's messaging system
+  5. Target chain:
+     - Receives and validates the message
+     - Executes action through LendingPool's `dispatch()` method
+     - Updates state and emits confirmation events
 
-   - A relayer, a specialized node in the superchain network, reads the CrossChainX event.
+The protocol maintains consistency by using standardized message formats and validation across all supported chains, ensuring reliable cross-chain operations.
 
-**6. Prepare Cross-Chain Message:**
+## Token Architecture: aTokens, SuperChainAssets, and Underlying Assets
 
-   - The relayer prepares a cross-chain message containing the necessary information to execute the ActionX on the target chain.
+In Aave V2, when users supply assets like USDC to the protocol, these supplied assets are called "underlying assets". In return for supplying these assets, users receive "aTokens" which represent their deposit. aTokens follow a simple naming convention - the letter "a" followed by the asset name (e.g. aUSDC for USDC deposits, aSTK for STK deposits).
 
-**7. Dispatch Cross-Chain Message:**
+RiftLend introduces a new paradigm across the superchain called "SuperChainAssets". These are wrapper tokens that provide a seamless cross-chain experience for users. When users deposit an underlying asset like USDC, they first receive a SuperChainAsset (e.g. superUSDC). This SuperChainAsset then acts as the underlying asset for minting aTokens.
 
-   - The relayer dispatches the cross-chain message to the target chain.
+The relationship between these tokens is:
 
-**8. Process ActionX on Target Chain:**
+1. User deposits underlying asset (e.g. USDC)
+2. Protocol mints SuperChainAsset (e.g. superUSDC)
+3. SuperChainAsset is used to mint aTokens (e.g. aUSDC)
 
-   - The target chain receives the cross-chain message and processes the ActionX using `dispatch()` method in LendingPool.
-   - The dispatch method decides which action needs to be done for which the event data has been submitted to it.
-   - It prepares the action based on exracted params of the event data and peform the action on current chain
-
-All of the functions work the same way .
-
-## How it works ? ( Level 3 : Code exploration )
-Coming soon ...
-
-## aTokens , SuperChain Asset and Underlying
-
-Inside Aave V2, whenever we supply or lend some  asset i.e USDC , that asset is called `Underlying`.
-For the supplied `underlying` asset , `aTokens` are minted to the `lender` for their supply. 
-ATokens follow the naming convention `a` followed by name of the asset like `aUSDC` for `USDC` and `aSTK` for `STK` etc.
-
-
-But inside Riftlend , across the whole superchain , we have a new paradigm called `SuperChainAsset` that is introduced to 
-bring seamless experience to all the super chain users. 
-
-A SuperChainAsset is a `wrapper on underlying asset` that acts as a super form of an asset like superUSDC for USDC and then this superUSDC will act as underlying for aTokens
+This architecture enables efficient cross-chain operations while maintaining compatibility with Aave's battle-tested token model.
 
 This can be visualized in following fashion
 
-
-
 ![aTokens](https://github.com/user-attachments/assets/f931a3c5-656e-4d94-8ac3-93a4933e1059)
-
-
 
 ## Withdraw & Bridge
 
-Initially , the lending pools will be bootstrapped like in usual defi protocols but when RiftLend gets traction ,
-it will gain huge liquidity among different lending pools on different chains. In that setting , we don't rely 
-on `burning on source chain and minting on destination chain` like bridge pattern.
+RiftLend introduces an innovative approach to cross-chain liquidity management that differs from traditional bridge patterns. While initially bootstrapped like typical DeFi protocols, once RiftLend achieves significant liquidity across chains, it eliminates the need for constant "burn and mint" operations between chains.
 
-With the introduction of `SuperchainAsset` , instead of moving the `underlying asset` i.e USDC when bridging between two differnt chains , we just move the SuperchainAsset equivelant of that asset to destination chain and have the underlying asset on source chain for now with an optional function to initiate the underlying asset's transfer from source chain to destination chain.
+The key innovation is the `SuperchainAsset` - a wrapper token that enables seamless cross-chain transfers without always moving the underlying asset. For example, when bridging USDC between chains, instead of transferring the actual USDC, RiftLend moves the `superUSDC` wrapper token while keeping the underlying USDC on the source chain.
 
-This might be confusing .
+To illustrate with an example:
 
-Let's understand with an example.
-Let's say Lender1 lends `100 USDC` to Lending pool on Chain `C1` and they get `100 superUSDC`.
-Now they want to `withdraw` their `100 USDC` on chain `C2`. Now Riftlend approach can differ in two scenarios.
+1. Lender1 deposits `100 USDC` to the Lending Pool on Chain A and receives `100 superUSDC`
+2. Lender1 wants to withdraw their `100 USDC` on Chain B
+3. RiftLend handles this in one of two ways:
 
-1. If Chain C2 has enough liquidity for USDC , then the Lender1 can freely withdraw the assets on chain C2 by converting 
-`superUSDC` to `USDC` on chain C2 itself `without` the need to `actually brige the underlying USDC from Chain C1 to C2`. 
+**Scenario 1: Sufficient Liquidity on Destination Chain**
 
-2. If Chain C2 does not have enough liquidity , the `underlying asset USDC` from Chain `C1` needs to be `transferred to C2` using a bridge functionality and then Lender1 can withdraw their USDC on Chain C2.
+- If Chain B has enough USDC liquidity, Lender1 can instantly withdraw by converting their `superUSDC` to USDC directly on Chain B
+- No actual USDC needs to be bridged from Chain A to B
+- This enables near-instant withdrawals with minimal gas costs
 
-( More information on the way .... )
+**Scenario 2: Insufficient Liquidity on Destination Chain**
 
+- If Chain B lacks sufficient USDC liquidity, the underlying USDC must be bridged from Chain A to B
+- RiftLend initiates a bridge transfer of the actual USDC tokens
+- Once bridged, Lender1 can complete their withdrawal on Chain B
 
-
-
-WIP: 🔨
+This dual approach optimizes for both speed and capital efficiency while maintaining full asset backing across the system.
 
 ## 🤝 Contributing
 
-Contributions are encouraged, but please open an issue before making any major changes to ensure your changes will be accepted. Checkout our [Projects board](https://github.com/RiftLend/monorepo-v1/projects?query=is%3Aopen) to see what we are actively planning to work on. We also have a [Discord Group](https://discord.gg/B4HxhA55d2) to have open discussions.
+We welcome contributions to RiftLend! Here's how you can get involved:
 
-### 📢 Marketing Support Needed
-
-We're gearing up for our alpha launch and looking for marketing-savvy contributors! If you have experience in:
-
-- DeFi/Web3 content creation
-- Community building
-- Social media management
-- Growth hacking
-- Technical writing
-
-Please join our [Discord Group](https://discord.gg/B4HxhA55d2) or open an issue to discuss how you can help shape RiftLend's market presence. Let's build something amazing together! 🚀
-
-### 🔒 Security Contributors Needed
-
-We're looking for security-minded contributors to help strengthen our protocol! If you have experience or interest in:
-
-- Smart contract security
-- Code review and testing
-- Security documentation
-- Threat modeling
-- Best practices implementation
-
-Whether you're a security enthusiast or experienced researcher, we welcome your contributions to make RiftLend more secure. Join our [Discord Group](https://discord.gg/B4HxhA55d2) or open an issue to discuss how you can help. Let's build a safer DeFi ecosystem together! 🛡️
+1. Check our [Projects board](https://github.com/RiftLend/monorepo-v1/projects?query=is%3Aopen) to see what we're working on
+2. For major changes, please open an issue first to discuss your proposed changes
+3. Join our [Discord community](https://discord.gg/B4HxhA55d2) to connect with other contributors
+4. Follow our contribution guidelines:
+   - Fork the repository
+   - Create a new branch for your feature
+   - Write clear commit messages
+   - Add tests for new functionality
+   - Submit a pull request
