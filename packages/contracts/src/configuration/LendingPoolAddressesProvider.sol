@@ -28,9 +28,11 @@ contract LendingPoolAddressesProvider is SuperOwnable {
     bytes32 private constant PRICE_ORACLE = "PRICE_ORACLE";
     bytes32 private constant LENDING_RATE_ORACLE = "LENDING_RATE_ORACLE";
     bytes32 private constant RELAYER = "RELAYER";
+    bytes32 private constant ROUTER = "ROUTER";
 
     event SuperchainAssetUpdated(address indexed superchainAsset);
     event RelayerUpdated(address indexed relayer);
+    event RouterUpdated(address indexed router);
 
     constructor(string memory marketId, address initialOwner, address proxyAdmin) {
         _initializeSuperOwner(uint64(block.chainid), initialOwner);
@@ -196,6 +198,7 @@ contract LendingPoolAddressesProvider is SuperOwnable {
         emit LendingRateOracleUpdated(lendingRateOracle);
     }
 
+    
     function getRelayer() external view returns (address) {
         return getAddress(RELAYER);
     }
@@ -231,5 +234,14 @@ contract LendingPoolAddressesProvider is SuperOwnable {
     function _setMarketId(string memory marketId) internal {
         _marketId = marketId;
         emit MarketIdSet(marketId);
+    }
+
+    function getRouter() external view returns (address) {
+        return getAddress(ROUTER);
+    }
+
+    function setRouter(address router) external onlyOwner {
+        _addresses[ROUTER] = router;
+        emit RouterUpdated(router);
     }
 }

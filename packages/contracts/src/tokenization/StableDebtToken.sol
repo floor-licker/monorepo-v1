@@ -217,7 +217,9 @@ contract StableDebtToken is IStableDebtToken, DebtTokenBase {
     function burn(address user, uint256 amount) external override onlyLendingPool returns (uint256, uint256) {
         (, uint256 currentBalance, uint256 balanceIncrease) = _calculateBalanceIncrease(user);
 
-        uint256 previousSupply = totalSupply(); /// @dev here the totalSupply is totalCrossChainSupply
+        uint256 previousSupply = totalSupply();
+
+        /// @dev here the totalSupply is totalCrossChainSupply
         uint256 newAvgStableRate = 0;
         uint256 nextSupply = 0;
         uint256 userStableRate = _usersStableRate[user];

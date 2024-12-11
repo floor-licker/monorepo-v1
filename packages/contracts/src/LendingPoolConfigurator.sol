@@ -122,8 +122,8 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
 
         pool.initReserve(
             input.underlyingAsset,
-            aTokenProxyAddress,
             input.superchainAsset,
+            aTokenProxyAddress,
             stableDebtTokenProxyAddress,
             variableDebtTokenProxyAddress,
             input.interestRateStrategyAddress
@@ -433,15 +433,6 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
     function setReserveInterestRateStrategyAddress(address asset, address rateStrategyAddress) external onlyPoolAdmin {
         pool.setReserveInterestRateStrategyAddress(asset, rateStrategyAddress);
         emit ReserveInterestRateStrategyChanged(asset, rateStrategyAddress);
-    }
-
-    /**
-     * @dev pauses or unpauses all the actions of the protocol, including aToken transfers
-     * @param val true if protocol needs to be paused, false otherwise
-     *
-     */
-    function setPoolPause(bool val) external onlyEmergencyAdmin {
-        pool.setPause(val);
     }
 
     function _initTokenWithProxy(address implementation, bytes memory initParams, bytes32 _salt)

@@ -3,6 +3,7 @@ pragma solidity 0.8.25;
 
 import {ILendingPoolAddressesProvider} from "./ILendingPoolAddressesProvider.sol";
 import {DataTypes} from "../libraries/types/DataTypes.sol";
+import "@contracts-bedrock/L2/interfaces/ICrossL2Inbox.sol";
 
 /**
  * @dev Emitted on deposit()
@@ -102,7 +103,13 @@ event Repay(
  * @param stableDebtAmount The amount of stable debt being minted
  *
  */
-event Swap(address indexed reserve, address indexed user, uint256 rateMode, uint256 variableDebtAmount, uint256 stableDebtAmount);
+event Swap(
+    address indexed reserve,
+    address indexed user,
+    uint256 rateMode,
+    uint256 variableDebtAmount,
+    uint256 stableDebtAmount
+);
 
 /**
  * @dev Emitted on setUserUseReserveAsCollateral()
@@ -184,66 +191,155 @@ event LiquidationCall(
     uint256 collateralATokenBurned
 );
 
+error OriginNotLendingPoolConfigurator();
+error InvalidChainId(uint256 chainId);
+error InvalidSelector(bytes32 selector);
+error OriginNotSuperLend();
+
+event FlashLoanInitiated(address indexed receiver, address[] assets, uint256[] amounts);
+
+event RebalanceStableBorrowRateCrossChain(uint256 chainId, address asset, address user);
+
+event CrossChainSwapBorrowRateMode(uint256 chainId, address user, address asset, uint256 rateMode);
+
+event ReserveConfigurationChanged(address indexed asset, uint256 configuration);
+
+event CrossChainRebalanceStableBorrowRate(uint256 chainId, address asset, address user);
+
+event CrossChainSetUserUseReserveAsCollateral(uint256 chainId, address asset, bool useAsCollateral);
+
+// Update the DepositInitiated event to include chain IDs
+event CrossChainDeposit(
+    uint256 fromChainId, address sender, address asset, uint256 amount, address onBehalfOf, uint16 referralCode
+);
+
+event CrossChainLiquidationCall(
+    uint256 chainId,
+    address sender,
+    address collateralAsset,
+    address debtAsset,
+    address user,
+    uint256 debtToCover,
+    bool receiveAToken,
+    uint256 sendToChainId
+);
+
+// Add new event for cross-chain borrows
+event CrossChainBorrow(
+    uint256 borrowFromChainId,
+    uint256 sendToChainId,
+    address sender,
+    address asset,
+    uint256 amount,
+    uint256 interestRateMode,
+    address onBehalfOf,
+    uint16 referralCode
+);
+
+event CrossChainWithdraw(
+    uint256 fromChainId, address sender, address asset, uint256 amount, address to, uint256 toChainId
+);
+
+event CrossChainRepay(
+    uint256 toChainId, address sender, address asset, uint256 amount, uint256 rateMode, address onBehalfOf
+);
+
+event ReserveUsedAsCollateral(address user, address asset, bool useAsCollateral);
+
+event SetUserUseReserveAsCollateralCrossChain(uint256 chainId, address user, address asset, bool useAsCollateral);
+
+event InitiateFlashLoanCrossChain(
+    uint256 chainId,
+    address sender,
+    address receiverAddress,
+    address[] assets,
+    uint256[] amounts,
+    uint256[] modes,
+    address onBehalfOf,
+    bytes params,
+    uint16 referralCode
+);
+
 interface ILendingPool {
     /**
      * @dev Functions to deposit/withdraw into the reserve
      */
     function deposit(
+        address sender,
         address asset,
-        uint256[] calldata amounts,
+        uint256 amount,
         address onBehalfOf,
-        uint16 referralCode,
-        uint256[] calldata chainIds
+        uint16 referralCode
     ) external;
 
     function withdraw(
+        address sender,
         address asset,
-        uint256[] calldata amounts,
+        uint256 amount,
         address to,
-        uint256 toChainId,
-        uint256[] calldata chainIds
+        uint256 toChainId
     ) external;
 
     /**
      * @dev Functions to borrow from the reserve
      */
     function borrow(
+        address sender,
         address asset,
-        uint256[] calldata amounts,
-        uint256[] calldata interestRateMode,
-        uint16 referralCode,
+        uint256 amount,
+        uint256 interestRateMode,
         address onBehalfOf,
         uint256 sendToChainId,
-        uint256[] calldata chainIds
+        uint16 referralCode
     ) external;
 
     function repay(
+        address sender,
         address asset,
-        uint256[] calldata amounts,
-        uint256 totalAmount,
-        uint256[] calldata rateMode,
-        address onBehalfOf,
-        uint256[] calldata chainIds
+        uint256 amount,
+        uint256 rateMode,
+        address onBehalfOf
     ) external;
 
-    function swapBorrowRateMode(address asset, uint256 rateMode) external;
+    function swapBorrowRateMode(address sender, address asset, uint256 rateMode) external;
 
-    function rebalanceStableBorrowRate(address asset, address user, uint256[] calldata chainIds) external;
+    function rebalanceStableBorrowRate(address asset, address user) external;
 
-    function setUserUseReserveAsCollateral(address asset, bool[] calldata useAsCollateral, uint256[] calldata chainIds)
-        external;
+    function setUserUseReserveAsCollateral(address sender, address asset, bool useAsCollateral) external;
 
     function liquidationCall(
+        address sender,
         address collateralAsset,
         address debtAsset,
         address user,
-        uint256[] calldata debtToCover,
-        uint256 totalDebtToCover,
-        uint256[] calldata chainIds,
+        uint256 debtToCover,
         bool receiveAToken,
         uint256 sendToChainId
     ) external;
 
+    function updateStates(
+        address asset,
+        uint256 depositAmount,
+        uint256 withdrawAmount,
+        bytes2 mask
+    ) external;
+
+    function initReserve(
+        address asset,
+        address superchainAsset,
+        address aTokenAddress,
+        address stableDebtAddress,
+        address variableDebtAddress,
+        address interestRateStrategyAddress
+    ) external;
+
+    function setReserveInterestRateStrategyAddress(address asset, address rateStrategyAddress) external;
+
+    function setConfiguration(address asset, uint256 configuration) external;
+
+    function setConfiguration(Identifier calldata _identifier, bytes calldata _data) external;
+
+    // View functions
     function getUserAccountData(address user)
         external
         view
@@ -256,19 +352,6 @@ interface ILendingPool {
             uint256 healthFactor
         );
 
-    function initReserve(
-        address reserve,
-        address aTokenAddress,
-        address superchainAsset,
-        address stableDebtAddress,
-        address variableDebtAddress,
-        address interestRateStrategyAddress
-    ) external;
-
-    function setReserveInterestRateStrategyAddress(address reserve, address rateStrategyAddress) external;
-
-    function setConfiguration(address reserve, uint256 configuration) external;
-
     function getConfiguration(address asset) external view returns (DataTypes.ReserveConfigurationMap memory);
 
     function getUserConfiguration(address user) external view returns (DataTypes.UserConfigurationMap memory);
@@ -279,20 +362,37 @@ interface ILendingPool {
 
     function getReserveData(address asset) external view returns (DataTypes.ReserveData memory);
 
+    function getReservesList() external view returns (address[] memory);
+
+    function getAddressesProvider() external view returns (ILendingPoolAddressesProvider);
+
+    function MAX_STABLE_RATE_BORROW_SIZE_PERCENT() external view returns (uint256);
+
+    function FLASHLOAN_PREMIUM_TOTAL() external view returns (uint256);
+
+    function MAX_NUMBER_RESERVES() external view returns (uint256);
+
     function finalizeTransfer(
         address asset,
         address from,
         address to,
         uint256 amount,
-        uint256 balanceFromAfter,
+        uint256 balanceFromBefore,
         uint256 balanceToBefore
     ) external;
-
-    function getReservesList() external view returns (address[] memory);
-
-    function getAddressesProvider() external view returns (ILendingPoolAddressesProvider);
 
     function setPause(bool val) external;
 
     function paused() external view returns (bool);
+
+    function flashLoan(
+        address sender,
+        address receiverAddress,
+        address[] calldata assets,
+        uint256[] calldata amounts,
+        uint256[] calldata modes,
+        address onBehalfOf,
+        bytes calldata params,
+        uint16 referralCode
+    ) external;
 }
