@@ -397,7 +397,7 @@ contract LendingPool is Initializable, LendingPoolStorage, SuperPausable {
     ) internal {
         if (mask & UPDATE_STATE_MASK != 0) reserve.updateState();
         if (mask & UPDATE_RATES_MASK != 0) {
-            reserve.updateInterestRates(asset, reserve.aTokenAddress, depositAmount, withdrawAmount);
+            reserve.updateInterestRates(reserve.superchainAssetAddress, reserve.aTokenAddress, depositAmount, withdrawAmount);
         }
     }
 

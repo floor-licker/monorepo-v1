@@ -26,6 +26,7 @@ interface IInitializableAToken {
      */
     event Initialized(
         address indexed underlyingAsset,
+        address undergroundAsset,
         address indexed pool,
         address treasury,
         address incentivesController,
@@ -50,6 +51,7 @@ interface IInitializableAToken {
         ILendingPool pool,
         address treasury,
         address underlyingAsset,
+        address undergroundAsset,
         IAaveIncentivesController incentivesController,
         ILendingPoolAddressesProvider addressesProvider,
         uint8 aTokenDecimals,

@@ -79,6 +79,7 @@ contract LendingPoolConfigurator is Initializable, ILendingPoolConfigurator {
                 IInitializableAToken.initialize.selector,
                 pool,
                 input.treasury,
+                input.superchainAsset,
                 input.underlyingAsset,
                 IAaveIncentivesController(input.incentivesController),
                 addressesProvider,

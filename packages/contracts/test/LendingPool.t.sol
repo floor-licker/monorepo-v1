@@ -19,7 +19,7 @@ import {LendingPoolConfigurator} from "../src/LendingPoolConfigurator.sol";
 import {DefaultReserveInterestRateStrategy} from "../src/DefaultReserveInterestRateStrategy.sol";
 import {LendingRateOracle} from "../src/LendingRateOracle.sol";
 
-contract baseTest is Test {
+contract BaseTest is Test {
 
     // chains
     uint256 public opMainnet;
@@ -27,7 +27,8 @@ contract baseTest is Test {
 
     // participants
     address public owner = vm.addr(1000);
-    address public admin;
+    address public proxyAdmin;
+    address public poolAdmin = vm.addr(100);
     address public alice = vm.addr(1);
     address public bob = vm.addr(2);
 
@@ -49,10 +50,10 @@ contract baseTest is Test {
     LendingRateOracle public oracle;
     LendingPool public implementationLp;
     LendingPool public proxyLp ;
-    ProxyAdmin public proxyAdmin;
+    ProxyAdmin public proxyAdminContract;
 
     function setUp() public {
-        vm.label(admin, 'admin');
+        vm.label(proxyAdmin, 'proxyAdmin');
         vm.label(owner, 'owner');
         vm.label(alice, 'alice');
 
@@ -78,8 +79,13 @@ contract baseTest is Test {
         // implementation variabledebtToekn
         variabledebtTokenImpl = new VariableDebtToken();
 
+        // proxyAdmin
+        vm.prank(owner);
+        proxyAdminContract = new ProxyAdmin();
+        proxyAdmin = address(proxyAdminContract);
+
         // lendingPoolAddressProvider
-        lpAddressProvider = new LendingPoolAddressesProvider("Underlying",owner,owner);
+        lpAddressProvider = new LendingPoolAddressesProvider("Underlying",owner,proxyAdmin);
         vm.label(address(lpAddressProvider), "lpAddressProvider");
         
         // superchainAsset for opMainnet
@@ -89,11 +95,6 @@ contract baseTest is Test {
         // implementation LendingPool
         implementationLp = new LendingPool();
         vm.label(address(implementationLp), "implementationLp");
-
-        // admin
-        vm.prank(owner);
-        proxyAdmin = new ProxyAdmin();
-        admin = address(proxyAdmin);
         
         // proxy LendingPool
         vm.prank(owner);
@@ -103,7 +104,7 @@ contract baseTest is Test {
 
         // settings in addressProvider
         vm.prank(owner);
-        lpAddressProvider.setPoolAdmin(admin);
+        lpAddressProvider.setPoolAdmin(poolAdmin);
 
         // implementation configurator
         lpConfigurator = new LendingPoolConfigurator();
@@ -139,22 +140,22 @@ contract baseTest is Test {
         // implementation variabledebtToekn
         variabledebtTokenImpl = new VariableDebtToken();
 
+        // proxyAdmin
+        vm.prank(owner);
+        proxyAdminContract = new ProxyAdmin();
+        proxyAdmin = address(proxyAdminContract);
+
         // lendingPoolAddressProvider
-        lpAddressProvider = new LendingPoolAddressesProvider("Underlying",owner,owner);
+        lpAddressProvider = new LendingPoolAddressesProvider("Underlying",owner,proxyAdmin);
         vm.label(address(lpAddressProvider), "lpAddressProvider");
         
-        // superchainAsset for opMainnet
+        // superchainAsset for base
         superchainAsset = new SuperchainAsset("superchainAsset","SCA",18,address(Underlying),ILendingPoolAddressesProvider(address(lpAddressProvider)),owner);
         vm.label(address(superchainAsset), "superchainAsset");
 
         // implementation LendingPool
         implementationLp = new LendingPool();
         vm.label(address(implementationLp), "implementationLp");
-
-        // admin
-        vm.prank(owner);
-        proxyAdmin = new ProxyAdmin();
-        admin = address(proxyAdmin);
 
         // proxy LendingPool
         vm.prank(owner);
@@ -164,7 +165,7 @@ contract baseTest is Test {
 
         // settings in addressProvider
         vm.prank(owner);
-        lpAddressProvider.setPoolAdmin(admin);
+        lpAddressProvider.setPoolAdmin(poolAdmin);
 
         // implementation configurator
         lpConfigurator = new LendingPoolConfigurator();
@@ -185,38 +186,155 @@ contract baseTest is Test {
     }
 }
 
-contract LendingPoolTest is baseTest {
-
-    function testDeposit() public {
-        // arrange
-        vm.selectFork(opMainnet);
-
+contract Helpers is BaseTest {
+    function _deposit(
+        address caller,
+        address asset,
+        uint256[] memory amounts,
+        address onBehalfOf,
+        uint16 referralCode,
+        uint256[] memory chainIds
+    ) internal {
+        //arrange
         ILendingPoolConfigurator.InitReserveInput[] memory input = new ILendingPoolConfigurator.InitReserveInput[](1);
         input[0].aTokenImpl = address(aTokenImpl);
         input[0].stableDebtTokenImpl = address(stabledebtTokenImpl);
         input[0].variableDebtTokenImpl = address(variabledebtTokenImpl);
         input[0].underlyingAssetDecimals = 18;
         input[0].interestRateStrategyAddress = address(strategy);
-        input[0].underlyingAsset = address(Underlying);
+        input[0].underlyingAsset = address(asset);
         input[0].treasury = vm.addr(35);
         input[0].incentivesController = vm.addr(17);
         input[0].superchainAsset = address(superchainAsset);
-        input[0].underlyingAssetName = "Mock rupee";
+        input[0].underlyingAssetName = "Mock Underlying";
         input[0].aTokenName = "aToken-Underlying";
         input[0].aTokenSymbol = "aUnderlying";
-        input[0].variableDebtTokenName = "vDebt";
-        input[0].variableDebtTokenSymbol = "vDBT";
-        input[0].stableDebtTokenName = "vStable";
-        input[0].stableDebtTokenSymbol = "vSBT";
+        input[0].variableDebtTokenName = "vDebtToken";
+        input[0].variableDebtTokenSymbol = "vDT";
+        input[0].stableDebtTokenName = "sDebtToken";
+        input[0].stableDebtTokenSymbol = "sDT";
         input[0].params = "v";
         input[0].salt = "salt";
-        vm.prank(admin);
+        vm.prank(poolAdmin);
         proxyConfigurator.batchInitReserve(input);
 
         vm.prank(alice);
-        Underlying.approve(address(proxyLp),1000);
+        MockERC20(asset).approve(address(proxyLp),1000);
 
         // act
+        vm.prank(caller);
+        proxyLp.deposit(asset, amounts, onBehalfOf, referralCode, chainIds);
+    }
+
+    function _borrow(
+        address caller,
+        address asset,
+        uint256[] memory amounts,
+        uint256[] memory interestRateMode,
+        uint16 referralCode,
+        address onBehalfOf,
+        uint256 sendToChainId,
+        uint256[] memory chainIds
+    ) internal {
+        // arrange
+
+        // act
+        vm.prank(caller);
+        proxyLp.borrow(asset, amounts, interestRateMode, referralCode, onBehalfOf, sendToChainId, chainIds);
+    }
+
+    function _withdraw(
+        address caller,
+        address asset,
+        uint256[] memory amounts,
+        address to,
+        uint256 toChainId,
+        uint256[] memory chainIds
+    ) internal {
+        //arrange
+        
+        // act
+        vm.prank(caller);
+        proxyLp.withdraw(asset, amounts, to, toChainId, chainIds);
+    }
+    
+}
+
+contract LendingPoolTest is Helpers {
+
+    function testBorrow() public {
+        vm.selectFork(opMainnet);
+
+        // history : deposit
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////
+        // set inputs and call action
+        address caller = bob;
+        address asset = address(Underlying);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 800;
+        uint256[] memory interestRateMode = new uint256[](1);
+        interestRateMode[0] = 1;
+        uint16 referralCode = 0;
+        address onBehalfOf = bob;
+        uint256 sendToChainId = block.chainid;
+        uint256[] memory chainIds = new uint256[](1);
+        chainIds[0] = block.chainid;
+        /***************************************************************************************************/
+        _borrow(caller, asset, amounts, interestRateMode, referralCode, onBehalfOf, sendToChainId, chainIds);
+        /***************************************************************************************************/
+
+
+        // assert
+        address superchainAsset_ = proxyLp.getReserveData(address(Underlying)).superchainAssetAddress;
+        address aToken_ = proxyLp.getReserveData(address(Underlying)).aTokenAddress;
+        // 1. underlying
+        assertEq(Underlying.balanceOf(superchainAsset_), 200);
+
+        // 2. superchainAsset
+        assertEq(SuperchainAsset(superchainAsset_).balanceOf(aToken_), 200);
+
+        // 3. aToken
+        assertEq(AToken(aToken_).balanceOf(alice), 200);
+
+        // 4. sDT
+
+        // 5. vDT
+    }
+
+    // function testRepay() public {
+    //     vm.selectFork(opMainnet);
+
+    //     // history : deposit, borrow
+
+
+    //     ///////////////////////////////////////////////////
+    //     // set inputs and call action
+    //     proxyLp.repay(asset, amounts, totalAmount, rateMode, onBehalfOf, chainIds);
+
+    //     // assert
+    //     address superchainAsset_ = proxyLp.getReserveData(address(Underlying)).superchainAssetAddress;
+    //     address aToken_ = proxyLp.getReserveData(address(Underlying)).aTokenAddress;
+    //     // 1. underlying
+    //     assertEq(Underlying.balanceOf(superchainAsset_), 200);
+
+    //     // 2. superchainAsset
+    //     assertEq(SuperchainAsset(superchainAsset_).balanceOf(aToken_), 200);
+
+    //     // 3. aToken
+    //     assertEq(AToken(aToken_).balanceOf(alice), 200);
+
+    //     // 4. sDT
+
+    //     // 5. vDT
+    // }
+
+    function testDeposit() public {
+        vm.selectFork(opMainnet);
+
+        /////////////////////////////////////////////////////////////////////
+        // set inputs and call action
+        address caller = alice;
         address asset = address(Underlying);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1000;
@@ -224,15 +342,15 @@ contract LendingPoolTest is baseTest {
         uint16 referralCode = 0;
         uint256[] memory chainIds = new uint256[](1);
         chainIds[0] = block.chainid;
-
-        vm.prank(alice);
-        proxyLp.deposit(asset, amounts, onBehalfOf, referralCode, chainIds);
+        /*******************************************************************/
+        _deposit(caller, asset, amounts, onBehalfOf, referralCode, chainIds);
+        /*******************************************************************/
 
         // assert
-        address superchainAsset_ = proxyLp.getReserveData(asset).superchainAssetAddress;
-        address aToken_ = proxyLp.getReserveData(asset).aTokenAddress;
+        address superchainAsset_ = proxyLp.getReserveData(address(Underlying)).superchainAssetAddress;
+        address aToken_ = proxyLp.getReserveData(address(Underlying)).aTokenAddress;
         // 1. underlying
-        assertEq(MockERC20(asset).balanceOf(superchainAsset_), 1000);
+        assertEq(Underlying.balanceOf(superchainAsset_), 1000);
 
         // 2. superchainAsset
         assertEq(SuperchainAsset(superchainAsset_).balanceOf(aToken_), 1000);
@@ -240,41 +358,13 @@ contract LendingPoolTest is baseTest {
         // 3. aToken
         assertEq(AToken(aToken_).balanceOf(alice), 1000);
 
-    }   
-
-    function testDepositCrossChain() public {
-
     }
 
     function testWithdraw() public {
-        // arrange
         vm.selectFork(opMainnet);
 
-        ILendingPoolConfigurator.InitReserveInput[] memory input = new ILendingPoolConfigurator.InitReserveInput[](1);
-        input[0].aTokenImpl = address(aTokenImpl);
-        input[0].stableDebtTokenImpl = address(stabledebtTokenImpl);
-        input[0].variableDebtTokenImpl = address(variabledebtTokenImpl);
-        input[0].underlyingAssetDecimals = 18;
-        input[0].interestRateStrategyAddress = address(strategy);
-        input[0].underlyingAsset = address(Underlying);
-        input[0].treasury = vm.addr(35);
-        input[0].incentivesController = vm.addr(17);
-        input[0].superchainAsset = address(superchainAsset);
-        input[0].underlyingAssetName = "Mock rupee";
-        input[0].aTokenName = "aToken-Underlying";
-        input[0].aTokenSymbol = "aUnderlying";
-        input[0].variableDebtTokenName = "vDebt";
-        input[0].variableDebtTokenSymbol = "vDBT";
-        input[0].stableDebtTokenName = "vStable";
-        input[0].stableDebtTokenSymbol = "vSBT";
-        input[0].params = "v";
-        input[0].salt = "salt";
-        vm.prank(admin);
-        proxyConfigurator.batchInitReserve(input);
-
-        vm.prank(alice);
-        Underlying.approve(address(proxyLp),1000);
-
+        // history : deposit
+        address caller = alice;
         address asset = address(Underlying);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1000;
@@ -282,113 +372,31 @@ contract LendingPoolTest is baseTest {
         uint16 referralCode = 0;
         uint256[] memory chainIds = new uint256[](1);
         chainIds[0] = block.chainid;
+        _deposit(caller, asset, amounts, onBehalfOf, referralCode, chainIds);
 
-        vm.prank(alice);
-        proxyLp.deposit(asset, amounts, onBehalfOf, referralCode, chainIds);        
-
-        // act
-        address asset_ = address(Underlying);
-        uint256[] memory amounts_ = new uint256[](1);
-        amounts_[0] = 800;
-        address to_ = alice;
-        uint256 toChainId_ = block.chainid;
-        uint256[] memory chainIds_ = new uint256[](1);
-        chainIds_[0] = block.chainid;
-
-        vm.prank(alice);
-        proxyLp.withdraw(asset_, amounts_, to_, toChainId_, chainIds_);
-
-        // assert
-
-    }
-
-    function testWithdrawCrossChain() public {
-
-    }
-
-    function testBorrow() public {
-        // arrange
-        vm.selectFork(opMainnet);
-
-        ILendingPoolConfigurator.InitReserveInput[] memory input = new ILendingPoolConfigurator.InitReserveInput[](1);
-        input[0].aTokenImpl = address(aTokenImpl);
-        input[0].stableDebtTokenImpl = address(stabledebtTokenImpl);
-        input[0].variableDebtTokenImpl = address(variabledebtTokenImpl);
-        input[0].underlyingAssetDecimals = 18;
-        input[0].interestRateStrategyAddress = address(strategy);
-        input[0].underlyingAsset = address(Underlying);
-        input[0].treasury = vm.addr(35);
-        input[0].incentivesController = vm.addr(17);
-        input[0].superchainAsset = address(superchainAsset);
-        input[0].underlyingAssetName = "Mock rupee";
-        input[0].aTokenName = "aToken-Underlying";
-        input[0].aTokenSymbol = "aUnderlying";
-        input[0].variableDebtTokenName = "vDebt";
-        input[0].variableDebtTokenSymbol = "vDBT";
-        input[0].stableDebtTokenName = "vStable";
-        input[0].stableDebtTokenSymbol = "vSBT";
-        input[0].params = "v";
-        input[0].salt = "salt";
-        vm.prank(admin);
-        proxyConfigurator.batchInitReserve(input);
-
-        vm.prank(alice);
-        Underlying.approve(address(proxyLp),1000);
-
-        address asset = address(Underlying);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = 1000;
-        address onBehalfOf = alice;
-        uint16 referralCode = 0;
-        uint256[] memory chainIds = new uint256[](1);
-        chainIds[0] = block.chainid;
-
-        vm.prank(alice);
-        proxyLp.deposit(asset, amounts, onBehalfOf, referralCode, chainIds);
-
-        // act
-        address asset_ = address(Underlying);
-        uint256[] memory amounts_ = new uint256[](1);
-        amounts_[0] = 800;
-        uint256[] memory interestRateMode_ = new uint256[](1);
-        interestRateMode_[0] = 1;
-        uint16 referralCode_ = 0;
-        address onBehalfOf_ = bob;
-        uint256 sendToChainId_ = block.chainid;
-        uint256[] memory chainIds_ = new uint256[](1);
-        chainIds_[0] = block.chainid;
-
-        vm.prank(bob);
-        proxyLp.borrow(asset_, amounts_, interestRateMode_, referralCode_, onBehalfOf_, sendToChainId_, chainIds_);
-
-        // assert
-    }
-
-    function testBorrowCrossChain() public {
-
-    }
-
-    function testRepay() public {
-        // arrange
-
-        // act
-        address asset = address(Underlying);
-        uint256[] memory amounts = new uint256[](1);
+        ///////////////////////////////////////////////////////////
+        // set inputs and call action
+        caller = alice;
+        asset = address(Underlying);
         amounts[0] = 800;
-        uint256 totalAmount = 800;
-        uint256[] memory rateMode = new uint256[](1);
-        rateMode[0] = 1;
-        address onBehalfOf = bob;
-        uint256[] memory chainIds = new uint256[](1);
+        address to = alice;
+        uint256 toChainId = block.chainid;
         chainIds[0] = block.chainid;
-
-        vm.prank(alice);
-        proxyLp.repay(asset, amounts, totalAmount, rateMode, onBehalfOf, chainIds);
+        /*********************************************************/
+        _withdraw(caller, asset, amounts, to, toChainId, chainIds);      
+        /*********************************************************/
 
         // assert
+        address superchainAsset_ = proxyLp.getReserveData(address(Underlying)).superchainAssetAddress;
+        address aToken_ = proxyLp.getReserveData(address(Underlying)).aTokenAddress;
+        // 1. underlying
+        assertEq(Underlying.balanceOf(superchainAsset_), 200);
+
+        // 2. superchainAsset
+        assertEq(SuperchainAsset(superchainAsset_).balanceOf(aToken_), 200);
+
+        // 3. aToken
+        assertEq(AToken(aToken_).balanceOf(alice), 200);
     }
 
-    function testRepayCrossChain() public {
-
-    }
 }

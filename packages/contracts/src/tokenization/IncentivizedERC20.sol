@@ -199,9 +199,9 @@ abstract contract IncentivizedERC20 is Context, IERC20, IERC20Metadata {
         uint256 oldAccountBalance = _balances[account];
         _balances[account] = oldAccountBalance - amount;
 
-        if (address(_getIncentivesController()) != address(0)) {
-            _getIncentivesController().handleAction(account, oldTotalSupply, oldAccountBalance);
-        }
+        // if (address(_getIncentivesController()) != address(0)) {
+        //     _getIncentivesController().handleAction(account, oldTotalSupply, oldAccountBalance);
+        // }
     }
 
     function _approve(address owner, address spender, uint256 amount) internal virtual {

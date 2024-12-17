@@ -43,6 +43,7 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
     ILendingPool internal _pool;
     address internal _treasury;
     address internal _underlyingAsset;
+    address internal _undergroundAsset;
     IAaveIncentivesController internal _incentivesController;
     ILendingPoolAddressesProvider internal _addressesProvider;
 
@@ -80,6 +81,7 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
         ILendingPool pool,
         address treasury,
         address underlyingAsset,
+        address undergroundAsset,
         IAaveIncentivesController incentivesController,
         ILendingPoolAddressesProvider addressesProvider,
         uint8 aTokenDecimals,
@@ -105,10 +107,12 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
         _pool = pool;
         _treasury = treasury;
         _underlyingAsset = underlyingAsset;
+        _undergroundAsset = undergroundAsset;
         _incentivesController = incentivesController;
         _addressesProvider = addressesProvider;
         emit Initialized(
             underlyingAsset,
+            undergroundAsset,
             address(pool),
             treasury,
             address(incentivesController),
@@ -144,7 +148,6 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
             _totalCrossChainSupply -= amountScaled;
         }
     }
-
     /**
      * @dev Burns aTokens from `user` and sends the equivalent amount of underlying to `receiverOfUnderlying`
      * - Only callable by the LendingPool, as extra state updates there need to be managed
@@ -163,14 +166,12 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
         uint256 amountScaled = amount.rayDiv(index);
         require(amountScaled != 0, Errors.CT_INVALID_BURN_AMOUNT);
         _burn(user, amountScaled);
-
         if (toChainId != block.chainid) {
             ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
                 _underlyingAsset, receiverOfUnderlying, amount, toChainId
             );
         } else {
             ISuperchainAsset(_underlyingAsset).burn(receiverOfUnderlying, amount);
-            //@audit this _underlyingAsset and superchain asset are different, check initreserve in configurator
             //@audit withdraw may not work when amount > balances[aToken] (the case when some superchainAssets are transfered from aToken)
         }
 
@@ -259,7 +260,7 @@ contract AToken is Initializable, IncentivizedERC20("ATOKEN_IMPL", "ATOKEN_IMPL"
      *
      */
     function balanceOf(address user) public view override(IncentivizedERC20, IERC20) returns (uint256) {
-        return super.balanceOf(user).rayMul(_pool.getReserveNormalizedIncome(_underlyingAsset));
+        return super.balanceOf(user).rayMul(_pool.getReserveNormalizedIncome(_undergroundAsset));
     }
 
     /**
