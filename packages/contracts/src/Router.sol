@@ -286,11 +286,7 @@ contract Router is Initializable, SuperPausable {
         uint256[] calldata chainIds
     ) external whenNotPaused {
         for (uint256 i = 0; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.deposit(msg.sender, asset, amounts[i], onBehalfOf, referralCode);
-            } else {
-                emit CrossChainDeposit(chainIds[i], msg.sender, asset, amounts[i], onBehalfOf, referralCode);
-            }
+            emit CrossChainDeposit(chainIds[i], msg.sender, asset, amounts[i], onBehalfOf, referralCode);
         }
     }
 
@@ -309,11 +305,7 @@ contract Router is Initializable, SuperPausable {
         uint256[] calldata chainIds
     ) external whenNotPaused {
         for (uint256 i = 0; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.withdraw(msg.sender, asset, amounts[i], to, toChainId);
-            } else {
-                emit CrossChainWithdraw(chainIds[i], msg.sender, asset, amounts[i], to, toChainId);
-            }
+            emit CrossChainWithdraw(chainIds[i], msg.sender, asset, amounts[i], to, toChainId);
         }
     }
 
@@ -336,22 +328,16 @@ contract Router is Initializable, SuperPausable {
         uint256[] calldata chainIds
     ) external whenNotPaused {
         for (uint256 i = 0; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.borrow(
-                    msg.sender, asset, amounts[i], interestRateMode[i], onBehalfOf, sendToChainId, referralCode
-                );
-            } else {
-                emit CrossChainBorrow(
-                    chainIds[i],
-                    sendToChainId,
-                    msg.sender,
-                    asset,
-                    amounts[i],
-                    interestRateMode[i],
-                    onBehalfOf,
-                    referralCode
-                );
-            }
+            emit CrossChainBorrow(
+                chainIds[i],
+                sendToChainId,
+                msg.sender,
+                asset,
+                amounts[i],
+                interestRateMode[i],
+                onBehalfOf,
+                referralCode
+            );
         }
     }
 
@@ -376,14 +362,12 @@ contract Router is Initializable, SuperPausable {
         IERC20(asset).safeTransferFrom(msg.sender, address(this), totalAmount);
         ISuperchainAsset(reserve.superchainAssetAddress).mint(address(this), totalAmount);
         for (uint256 i = 1; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.repay(msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
-            } else {
-                ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
+            if (chainIds[i] != block.chainid) {
+ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
                     reserve.superchainAssetAddress, address(this), amounts[i], chainIds[i]
                 );
-                emit CrossChainRepay(chainIds[i], msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
             }
+            emit CrossChainRepay(chainIds[i], msg.sender, asset, amounts[i], rateMode[i], onBehalfOf);
         }
     }
 
@@ -392,11 +376,7 @@ contract Router is Initializable, SuperPausable {
         whenNotPaused
     {
         for (uint256 i = 0; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.swapBorrowRateMode(msg.sender, asset, rateMode);
-            } else {
-                emit CrossChainSwapBorrowRateMode(chainIds[i], msg.sender, asset, rateMode);
-            }
+            emit CrossChainSwapBorrowRateMode(chainIds[i], msg.sender, asset, rateMode);
         }
     }
 
@@ -412,11 +392,7 @@ contract Router is Initializable, SuperPausable {
      */
     function rebalanceStableBorrowRate(address asset, uint256[] calldata chainIds) external whenNotPaused {
         for (uint256 i = 0; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.rebalanceStableBorrowRate(asset, msg.sender);
-            } else {
-                emit RebalanceStableBorrowRateCrossChain(chainIds[i], asset, msg.sender);
-            }
+            emit RebalanceStableBorrowRateCrossChain(chainIds[i], asset, msg.sender);
         }
     }
 
@@ -431,11 +407,7 @@ contract Router is Initializable, SuperPausable {
         whenNotPaused
     {
         for (uint256 i = 0; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.setUserUseReserveAsCollateral(msg.sender, asset, useAsCollateral[i]);
-            } else {
-                emit SetUserUseReserveAsCollateralCrossChain(chainIds[i], msg.sender, asset, useAsCollateral[i]);
-            }
+            emit SetUserUseReserveAsCollateralCrossChain(chainIds[i], msg.sender, asset, useAsCollateral[i]);
         }
     }
 
@@ -468,25 +440,21 @@ contract Router is Initializable, SuperPausable {
         IERC20(debtAsset).safeTransferFrom(msg.sender, address(this), totalDebtToCover);
         ISuperchainAsset(reserve.superchainAssetAddress).mint(address(this), totalDebtToCover);
         for (uint256 i = 0; i < chainIds.length; i++) {
-            if (chainIds[i] == block.chainid) {
-                lendingPool.liquidationCall(
-                    msg.sender, collateralAsset, debtAsset, user, debtToCover[i], receiveAToken, sendToChainId
-                );
-            } else {
+            if (chainIds[i] != block.chainid) {
                 ISuperchainTokenBridge(Predeploys.SUPERCHAIN_TOKEN_BRIDGE).sendERC20(
                     reserve.superchainAssetAddress, address(this), debtToCover[i], chainIds[i]
                 );
-                emit CrossChainLiquidationCall(
-                    chainIds[i],
-                    msg.sender,
-                    collateralAsset,
-                    debtAsset,
-                    user,
-                    debtToCover[i],
-                    receiveAToken,
-                    sendToChainId
-                );
             }
+            emit CrossChainLiquidationCall(
+                chainIds[i],
+                msg.sender,
+                collateralAsset,
+                debtAsset,
+                user,
+                debtToCover[i],
+                receiveAToken,
+                sendToChainId
+            );
         }
     }
 
