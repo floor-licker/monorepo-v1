@@ -57,7 +57,13 @@ contract Router is Initializable, SuperPausable {
         addressesProvider = ILendingPoolAddressesProvider(_addressesProvider);
     }
 
-    function dispatch(Identifier calldata _identifier, bytes calldata _data) external onlyRelayer whenNotPaused {
+    function dispatch(Identifier[] calldata _identifier, bytes[] calldata _data) external onlyRelayer whenNotPaused {
+        for (uint256 i = 0; i < _identifier.length; i++) {
+            _dispatch(_identifier[i], _data[i]);
+        }
+    }
+
+    function _dispatch(Identifier calldata _identifier, bytes calldata _data) internal {
         bytes32 selector = abi.decode(_data[:32], (bytes32));
 
         /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
