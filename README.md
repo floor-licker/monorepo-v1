@@ -1,7 +1,7 @@
 # RiftLend
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/80ffc399-5d45-4e06-9584-6652be2913ea" alt="rftlend-logo" width="200" height="200" />
+  <img src="./assets/riftlend-dark-red.png" alt="rftlend-logo" width="200" height="200" />
 </div>
 
 RiftLend is a next-generation decentralized lending and borrowing protocol built natively for the OP super-chain ecosystem. Leveraging Aave V2's battle-tested architecture, RiftLend revolutionizes cross-chain DeFi operations by offering a unified, chain-agnostic lending experience with seamless cross-chain functionality.
@@ -35,6 +35,7 @@ To get started with RiftLend:
    ```
 
 ---
+
 ## Contributing
 
 We welcome community contributions! Here's how to get involved:
@@ -45,13 +46,9 @@ We welcome community contributions! Here's how to get involved:
 4. Submit a pull request with a clear description of changes and associated tests.
 
 ---
+
 ## Get in Touch
 
 - 🗒️ Read the [Documentation](./Documentation.md).
 - ❓ Have questions? Open an issue or reach out on [Discord](https://discord.gg/B4HxhA55d2).
 - 🐦 Follow us on Twitter for the latest updates.
-
-
-## License
-
-RiftLend is released under the **LGPL v3 License**. See the LICENSE file for details.
