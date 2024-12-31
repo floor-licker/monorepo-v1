@@ -2,7 +2,6 @@
 pragma solidity 0.8.25;
 
 import {ILendingPoolAddressesProvider} from "./interfaces/ILendingPoolAddressesProvider.sol";
-import {DataTypes} from "./libraries/types/DataTypes.sol";
 
 /**
  * @title LendingPoolStorage
